@@ -1,0 +1,17 @@
+# Ignore dependencies
+node_modules/
+
+# Build output
+/dist
+/target
+
+# Binary and temp files
+*.jar
+*.exe
+*.log
+.DS_Store
+.env
+
+# Editor and OS metadata
+.idea/
+.vscode/
