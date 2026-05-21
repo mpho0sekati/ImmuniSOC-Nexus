@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  backend:
+    build:
+      context: ./backend-spring
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    environment:
+      - BACKEND_HOST=backend:8081
+    ports:
+      - "8080:8080"
+      - "8090:8090"
+    restart: unless-stopped

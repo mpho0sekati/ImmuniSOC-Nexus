@@ -1,0 +1,9 @@
+version: '3.8'
+services:
+  backend:
+    build: .
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=default
+    restart: unless-stopped
