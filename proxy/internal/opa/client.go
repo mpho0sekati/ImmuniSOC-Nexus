@@ -109,6 +109,5 @@ func CheckPopiaCompliance(purpose string, accessedFields []string, consentGiven 
 		"retention_period": retentionPeriod,
 	}
 
-	client := NewOpaClient()
-	return client.CheckPolicy(input)
+	return defaultClient.CheckPolicy(input)
 }

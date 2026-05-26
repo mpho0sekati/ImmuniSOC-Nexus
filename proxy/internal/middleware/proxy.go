@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,6 +19,20 @@ const (
 	// 30 second validity window for timestamps
 	TimestampValidityWindow = 30 * time.Second
 )
+
+// Threat detection patterns
+var TraversalPatterns = []string{
+	"../",
+	"..\\",
+	"%2e%2e%2f",
+	"%2e%2e%5c",
+	"..%2f",
+	"..%5c",
+	"....//",
+	"....\\\\",
+	"..%252f",
+	"..%255c",
+}
 
 // ApplySecureHeaders injects security headers to enhance protection
 func ApplySecureHeaders(next http.Handler) http.Handler {
@@ -58,6 +74,90 @@ func ApplyAuthentication(sharedSecret string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// DetectThreats implements passive threat detection
+func DetectThreats(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check for directory traversal in URL path and query parameters
+		if hasDirectoryTraversal(r.URL.Path) || hasDirectoryTraversal(r.URL.RawQuery) {
+			// Log forensic event
+			logForensicEvent("Directory traversal detected", r)
+			// Return HTTP 451 - Unavailable For Legal Reasons
+			http.Error(w, "Unavailable For Legal Reasons - Threat Detected", 451)
+			return
+		}
+
+		// Check for canary tokens in headers, path, and query
+		if hasCanaryToken(r) {
+			// Log forensic event
+			logForensicEvent("Canary token detected", r)
+			// Return HTTP 451 - Unavailable For Legal Reasons
+			http.Error(w, "Unavailable For Legal Reasons - Threat Detected", 451)
+			return
+		}
+
+		// Continue with the next handler if no threats detected
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hasDirectoryTraversal checks if the input contains directory traversal patterns
+func hasDirectoryTraversal(input string) bool {
+	if input == "" {
+		return false
+	}
+
+	lowerInput := strings.ToLower(input)
+	for _, pattern := range TraversalPatterns {
+		if strings.Contains(lowerInput, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasCanaryToken checks if the request contains any canary tokens
+func hasCanaryToken(r *http.Request) bool {
+	// Check in headers
+	for name, values := range r.Header {
+		headerName := strings.ToLower(name)
+		if strings.Contains(headerName, "canary") || strings.Contains(headerName, "honey") {
+			return true
+		}
+		
+		for _, value := range values {
+			lowerValue := strings.ToLower(value)
+			if strings.Contains(lowerValue, "canary-token") ||
+				strings.Contains(lowerValue, "honeytoken") ||
+				strings.Contains(lowerValue, "tripwire") {
+				return true
+			}
+		}
+	}
+
+	// Check in URL path
+	pathLower := strings.ToLower(r.URL.Path)
+	if strings.Contains(pathLower, "canary-token") ||
+		strings.Contains(pathLower, "honeytoken") ||
+		strings.Contains(pathLower, "tripwire") {
+		return true
+	}
+
+	// Check in query parameters
+	queryParams, err := url.QueryUnescape(r.URL.RawQuery)
+	if err != nil {
+		// If we can't decode the query, use it as-is
+		queryParams = r.URL.RawQuery
+	}
+	queryLower := strings.ToLower(queryParams)
+	if strings.Contains(queryLower, "canary-token") ||
+		strings.Contains(queryLower, "honeytoken") ||
+		strings.Contains(queryLower, "tripwire") {
+		return true
+	}
+
+	return false
 }
 
 // GenerateHMACSignature creates a SHA-256 HMAC signature for a request
@@ -111,4 +211,21 @@ func VerifyHMACSignature(r *http.Request, secret string) (bool, error) {
 	
 	// Compare signatures using constant-time comparison
 	return hmac.Equal([]byte(signature), []byte(expectedSig)), nil
+}
+
+// logForensicEvent logs events for forensic analysis in append-only format
+func logForensicEvent(eventType string, r *http.Request) {
+	// Append-only event logging for forensic ingestion
+	logEntry := fmt.Sprintf(
+		"[FORENSIC_LOG] %d | %s | %s | %s | %s | %s",
+		time.Now().UnixNano()/1000000, // timestamp in milliseconds
+		eventType,
+		r.RemoteAddr,
+		r.URL.Path,
+		r.URL.RawQuery,
+		r.UserAgent(),
+	)
+	
+	// In a real implementation, this would write to an append-only log file or database
+	fmt.Println(logEntry) // For demonstration purposes
 }

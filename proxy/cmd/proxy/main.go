@@ -71,6 +71,16 @@ func rateLimit(next http.Handler) http.Handler {
 	})
 }
 
+// detectThreats middleware implements passive threat detection
+func detectThreats(next http.Handler) http.Handler {
+	return middleware.DetectThreats(next)
+}
+
+// authenticateRequest middleware adds HMAC-based authentication
+func authenticateRequest(next http.Handler) http.Handler {
+	return middleware.ApplyAuthentication(HandshakeSecretToken)(next)
+}
+
 // classifyRequest middleware classifies the request based on content
 func classifyRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,9 +101,13 @@ func classifyRequest(next http.Handler) http.Handler {
 	})
 }
 
-// authenticateRequest middleware adds HMAC-based authentication
-func authenticateRequest(next http.Handler) http.Handler {
-	return middleware.ApplyAuthentication(HandshakeSecretToken)(next)
+// maskSensitiveData implements data minimization by masking non-critical segments
+func maskSensitiveData(data string) string {
+	// Simple implementation - in a real system this would be more sophisticated
+	if len(data) > 10 {
+		return data[:3] + "..." + data[len(data)-3:]
+	}
+	return data
 }
 
 // popiaCompliance middleware checks POPIA compliance
@@ -168,15 +182,6 @@ func checkOPAPolicy(next http.Handler) http.Handler {
 	})
 }
 
-// maskSensitiveData implements data minimization by masking non-critical segments
-func maskSensitiveData(data string) string {
-	// Simple implementation - in a real system this would be more sophisticated
-	if len(data) > 10 {
-		return data[:3] + "..." + data[len(data)-3:]
-	}
-	return data
-}
-
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
 	// Get IP from X-Forwarded-For header if present
@@ -239,18 +244,21 @@ func main() {
 
 	// Apply middleware stack in the specified order:
 	// 1. Apply Secure Headers
-	// 2. Authenticate Request (add HMAC signatures)
-	// 3. Check Rate Limiter
-	// 4. Classify Request (get Tier)
-	// 5. POPIA Compliance Check
-	// 6. Query OPA (get decision)
-	// 7. Route to backend or Block
+	// 2. Detect Threats (passive threat detection)
+	// 3. Authenticate Request (add HMAC signatures)
+	// 4. Check Rate Limiter
+	// 5. Classify Request (get Tier)
+	// 6. POPIA Compliance Check
+	// 7. Query OPA (get decision)
+	// 8. Route to backend or Block
 	handler := middleware.ApplySecureHeaders(
-		authenticateRequest(
-			rateLimit(
-				classifyRequest(
-					popiaCompliance(
-						checkOPAPolicy(mux),
+		detectThreats(
+			middleware.ApplyAuthentication(HandshakeSecretToken)(
+				rateLimit(
+					classifyRequest(
+						popiaCompliance(
+							checkOPAPolicy(mux),
+						),
 					),
 				),
 			),

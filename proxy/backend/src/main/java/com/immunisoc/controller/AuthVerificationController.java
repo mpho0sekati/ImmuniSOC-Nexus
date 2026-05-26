@@ -13,6 +13,8 @@ import java.time.Instant;
 import java.util.Formatter;
 
 import javax.servlet.http.HttpServletRequest;
+import java.util.Arrays;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api")
@@ -23,9 +25,36 @@ public class AuthVerificationController {
 
     private static final long TIMESTAMP_VALIDITY_WINDOW_SECONDS = 30;
 
+    // Canary dataset flags and tripwire strings
+    private static final List<String> CANARY_TOKENS = Arrays.asList(
+        "canary-token-12345",
+        "honeytoken-sensitive-data",
+        "tripwire-access-token",
+        "decoy-user-profile-abc",
+        "canary-document-key-xyz"
+    );
+
+    // Directory traversal patterns to detect
+    private static final List<String> TRAVERSAL_PATTERNS = Arrays.asList(
+        "../",
+        "..\\",
+        "%2e%2e%2f",
+        "%2e%2e%5c",
+        "..%2f",
+        "..%5c",
+        "....//",
+        "....\\\\"
+    );
+
     @RequestMapping(value = "/**", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE})
     public ResponseEntity<String> handleRequest(@RequestHeader HttpHeaders headers, HttpServletRequest request) {
         try {
+            // Check for threats first
+            if (hasCanaryToken(request) || hasDirectoryTraversal(request)) {
+                logForensicEvent("Threat detected via canary token or directory traversal", request);
+                return ResponseEntity.status(451).body("Unavailable For Legal Reasons - Threat Detected");
+            }
+
             // Verify HMAC signature
             if (!verifyHmacSignature(headers, request)) {
                 return ResponseEntity.status(401).body("Unauthorized: Invalid HMAC signature");
@@ -41,6 +70,63 @@ public class AuthVerificationController {
         } catch (Exception e) {
             return ResponseEntity.status(500).body("Internal server error: " + e.getMessage());
         }
+    }
+
+    private boolean hasCanaryToken(HttpServletRequest request) {
+        String userAgent = request.getHeader("User-Agent");
+        String queryString = request.getQueryString();
+        String requestUri = request.getRequestURI();
+        String requestBody = getRequestPayload(request); // This would need to be implemented to read body
+        
+        return hasCanaryTokenInString(userAgent) || 
+               hasCanaryTokenInString(queryString) || 
+               hasCanaryTokenInString(requestUri) ||
+               hasCanaryTokenInString(requestBody);
+    }
+
+    private boolean hasCanaryTokenInString(String input) {
+        if (input == null) {
+            return false;
+        }
+
+        String lowerInput = input.toLowerCase();
+        for (String token : CANARY_TOKENS) {
+            if (lowerInput.contains(token.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasDirectoryTraversal(HttpServletRequest request) {
+        String queryString = request.getQueryString();
+        String requestUri = request.getRequestURI();
+        String requestBody = getRequestPayload(request); // This would need to be implemented to read body
+        
+        return hasDirectoryTraversalInString(queryString) || 
+               hasDirectoryTraversalInString(requestUri) ||
+               hasDirectoryTraversalInString(requestBody);
+    }
+
+    private boolean hasDirectoryTraversalInString(String input) {
+        if (input == null) {
+            return false;
+        }
+
+        String lowerInput = input.toLowerCase();
+        for (String pattern : TRAVERSAL_PATTERNS) {
+            if (lowerInput.contains(pattern.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Helper method to get request payload (would need custom implementation)
+    private String getRequestPayload(HttpServletRequest request) {
+        // In a real implementation, you'd need to read the request body
+        // This is simplified for this example
+        return "";
     }
 
     private boolean verifyHmacSignature(HttpHeaders headers, HttpServletRequest request) throws Exception {
@@ -98,5 +184,21 @@ public class AuthVerificationController {
         formatter.close();
 
         return result;
+    }
+
+    private void logForensicEvent(String eventType, HttpServletRequest request) {
+        // Append-only event logging for forensic ingestion
+        String logEntry = String.format(
+            "[FORENSIC_LOG] %s | %s | %s | %s | %s | %s",
+            System.currentTimeMillis(),
+            eventType,
+            request.getRemoteAddr(),
+            request.getRequestURI(),
+            request.getQueryString(),
+            request.getHeader("User-Agent")
+        );
+        
+        // In a real implementation, this would write to an append-only log file or database
+        System.out.println(logEntry); // For demonstration purposes
     }
 }
