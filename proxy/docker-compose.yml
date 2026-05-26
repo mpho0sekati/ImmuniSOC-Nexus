@@ -1,21 +1,44 @@
 version: '3.8'
+
 services:
   backend:
     build:
-      context: ./backend-spring
+      context: ./backend
       dockerfile: Dockerfile
     ports:
       - "8081:8081"
+    networks:
+      - nexus-network
     restart: unless-stopped
+
   proxy:
     build:
       context: .
       dockerfile: Dockerfile
     depends_on:
       - backend
+      - opa
     environment:
       - BACKEND_HOST=backend:8081
     ports:
       - "8080:8080"
       - "8090:8090"
+    networks:
+      - nexus-network
     restart: unless-stopped
+
+  opa:
+    image: openpolicyagent/opa:latest
+    ports:
+      - "8181:8181"
+    networks:
+      - nexus-network
+    command:
+      - "run"
+      - "--server"
+      - "--addr=:8181"
+      - "--diagnostic-addr=:8182"
+
+networks:
+  nexus-network:
+    driver: bridge

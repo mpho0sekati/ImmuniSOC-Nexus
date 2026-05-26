@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  proxy:
+    build: ..
+    ports:
+      - "8080:8080"
+    networks:
+      - nexus-network
+    depends_on:
+      - opa
+
+  opa:
+    image: openpolicyagent/opa:latest
+    ports:
+      - "8181:8181"
+    networks:
+      - nexus-network
+    command:
+      - "run"
+      - "--server"
+      - "--addr=:8181"
+      - "--diagnostic-addr=:8182"
+
+networks:
+  nexus-network:
+    driver: bridge
