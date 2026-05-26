@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.Formatter;
 
 import javax.servlet.http.HttpServletRequest;
+import java.util.stream.Collectors;
 import java.util.Arrays;
 import java.util.List;
 
@@ -124,9 +125,12 @@ public class AuthVerificationController {
 
     // Helper method to get request payload (would need custom implementation)
     private String getRequestPayload(HttpServletRequest request) {
-        // In a real implementation, you'd need to read the request body
-        // This is simplified for this example
-        return "";
+        try {
+            return request.getReader().lines().collect(Collectors.joining(System.lineSeparator()));
+        } catch (Exception e) {
+            // If we can't read the body, we return empty to avoid breaking the flow
+            return "";
+        }
     }
 
     private boolean verifyHmacSignature(HttpHeaders headers, HttpServletRequest request) throws Exception {

@@ -8,6 +8,11 @@ services:
     networks:
       - nexus-network
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   proxy:
     build:
@@ -25,6 +30,11 @@ services:
     networks:
       - nexus-network
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   opa:
     image: openpolicyagent/opa:latest
@@ -37,6 +47,11 @@ services:
       - "--server"
       - "--addr=:8181"
       - "--diagnostic-addr=:8182"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   nexus-network:
