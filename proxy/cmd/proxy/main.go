@@ -18,12 +18,14 @@ import (
 	"immunisoc-nexus/proxy/internal/deception"
 	"immunisoc-nexus/proxy/internal/middleware"
 	"immunisoc-nexus/proxy/internal/opa"
+	"immunisoc-nexus/proxy/internal/tcell"
 )
 
-// Global instances for deception and tracking
+// Global instances for deception, tracking, and healing
 var (
 	deceptionGen *deception.Generator
 	bloodTracker *bloodhound.Tracker
+	tcellEngine  *tcell.Engine
 )
 
 // rateLimiterMap stores rate limiters per IP address
@@ -32,10 +34,11 @@ var (
 	mu             sync.Mutex
 )
 
-// Initialize deception and tracking systems
+// Initialize deception, tracking, and healing systems
 func init() {
 	deceptionGen = deception.NewGenerator("canary")
 	bloodTracker = bloodhound.NewTracker()
+	tcellEngine = tcell.NewEngine()
 }
 
 // getRateLimiter retrieves or creates a rate limiter for a given IP
@@ -83,12 +86,53 @@ func rateLimit(next http.Handler) http.Handler {
 // detectThreats middleware implements passive threat detection
 func detectThreats(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := getClientIP(r)
+		sessionID := getSessionID(r)
+		token := getTokenFromRequest(r)
+
+		// Check if IP is blocked by T-Cell
+		if !tcellEngine.IsIPAllowed(ip) {
+			log.Printf("Request from blocked IP %s rejected", ip)
+			http.Error(w, "Access denied - IP temporarily blocked", http.StatusForbidden)
+			return
+		}
+
+		// Check if session is valid
+		if sessionID != "unknown_session" && !tcellEngine.IsSessionValid(sessionID) {
+			log.Printf("Request with invalid session %s rejected", sessionID)
+			http.Error(w, "Access denied - Session terminated", http.StatusForbidden)
+			return
+		}
+
+		// Check if token is valid
+		if token != "" && !tcellEngine.IsTokenValid(token) {
+			log.Printf("Request with revoked token %s rejected", token)
+			http.Error(w, "Access denied - Token revoked", http.StatusForbidden)
+			return
+		}
+
 		// Check for directory traversal in URL path and query parameters
 		if hasDirectoryTraversal(r.URL.Path) || hasDirectoryTraversal(r.URL.RawQuery) {
 			// Log forensic event
 			logForensicEvent("Directory traversal detected", r)
 			// Track in bloodhound
 			bloodTracker.TrackRequest(r, true) // Mark as honeytrap hit
+
+			// Process threat with T-Cell
+			threatDetails := map[string]interface{}{
+				"threat_type":       "directory_traversal",
+				"detection_method":  "pattern_match",
+				"request_path":      r.URL.Path,
+				"request_query":     r.URL.RawQuery,
+			}
+			level := tcell.Critical // Directory traversal is critical
+			actions, err := tcellEngine.ProcessThreat(ip, sessionID, token, level, threatDetails)
+			if err != nil {
+				log.Printf("T-Cell error processing threat: %v", err)
+			} else {
+				log.Printf("T-Cell executed %d actions for threat from IP %s", len(actions), ip)
+			}
+
 			// Return HTTP 451 - Unavailable For Legal Reasons
 			http.Error(w, "Unavailable For Legal Reasons - Threat Detected", 451)
 			return
@@ -100,6 +144,22 @@ func detectThreats(next http.Handler) http.Handler {
 			logForensicEvent("Canary token detected", r)
 			// Track in bloodhound
 			bloodTracker.TrackRequest(r, true) // Mark as honeytrap hit
+
+			// Process threat with T-Cell
+			threatDetails := map[string]interface{}{
+				"threat_type":       "honeytrap_access",
+				"detection_method":  "canary_token",
+				"request_path":      r.URL.Path,
+				"user_agent":        r.UserAgent(),
+			}
+			level := tcell.Critical // Honeytrap access is critical
+			actions, err := tcellEngine.ProcessThreat(ip, sessionID, token, level, threatDetails)
+			if err != nil {
+				log.Printf("T-Cell error processing threat: %v", err)
+			} else {
+				log.Printf("T-Cell executed %d actions for threat from IP %s", len(actions), ip)
+			}
+
 			// Return HTTP 451 - Unavailable For Legal Reasons
 			http.Error(w, "Unavailable For Legal Reasons - Threat Detected", 451)
 			return
@@ -184,9 +244,28 @@ func injectDeception(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if this is a decoy endpoint
 		if isDecoyEndpoint(r.URL.Path) {
+			ip := getClientIP(r)
+			sessionID := getSessionID(r)
+			token := getTokenFromRequest(r)
+
 			// This is a decoy endpoint - log and respond accordingly
-			log.Printf("Decoy endpoint accessed: %s from %s", r.URL.Path, r.RemoteAddr)
+			log.Printf("Decoy endpoint accessed: %s from %s", r.URL.Path, ip)
 			bloodTracker.TrackRequest(r, true) // Mark as honeytrap hit
+
+			// Process threat with T-Cell
+			threatDetails := map[string]interface{}{
+				"threat_type":       "decoy_endpoint_access",
+				"detection_method":  "path_match",
+				"request_path":      r.URL.Path,
+				"user_agent":        r.UserAgent(),
+			}
+			level := tcell.High // Decoy endpoint access is high risk
+			actions, err := tcellEngine.ProcessThreat(ip, sessionID, token, level, threatDetails)
+			if err != nil {
+				log.Printf("T-Cell error processing threat: %v", err)
+			} else {
+				log.Printf("T-Cell executed %d actions for threat from IP %s", len(actions), ip)
+			}
 			
 			// Generate fake response for decoy endpoint
 			w.Header().Set("Content-Type", "application/json")
@@ -327,6 +406,38 @@ func checkOPAPolicy(next http.Handler) http.Handler {
 		
 		// If OPA denies the request, block it
 		if !allowed {
+			// Process threat with T-Cell when OPA blocks the request
+			ip := getClientIP(r)
+			sessionID := getSessionID(r)
+			token := getTokenFromRequest(r)
+			
+			threatDetails := map[string]interface{}{
+				"threat_type":         "opa_policy_block",
+				"opa_risk_score":      input["risk_score"],
+				"opa_threat_type":     input["threat_type"],
+				"opa_attack_path_score": input["attack_path_score"],
+				"request_path":        r.URL.Path,
+				"user_agent":          r.UserAgent(),
+			}
+			
+			// Determine containment level based on risk factors
+			riskScore, ok := input["risk_score"].(float64)
+			if !ok {
+				riskScore = 0
+			}
+			confidence, ok := input["confidence"].(float64)
+			if !ok {
+				confidence = 0
+			}
+			
+			level := tcell.GetContainmentLevel(riskScore, confidence, "opa_block")
+			actions, err := tcellEngine.ProcessThreat(ip, sessionID, token, level, threatDetails)
+			if err != nil {
+				log.Printf("T-Cell error processing OPA-blocked request: %v", err)
+			} else {
+				log.Printf("T-Cell executed %d actions for OPA-blocked request from IP %s", len(actions), ip)
+			}
+			
 			log.Printf("Request blocked by OPA policy: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "Access denied by policy", http.StatusForbidden)
 			return
@@ -355,6 +466,47 @@ func getClientIP(r *http.Request) string {
 	// Fallback to RemoteAddr
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	return host
+}
+
+// getSessionID extracts session ID from request (simplified)
+func getSessionID(r *http.Request) string {
+	sessionCookie, err := r.Cookie("session_id")
+	if err == nil && sessionCookie != nil {
+		return sessionCookie.Value
+	}
+	
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
+		return authHeader // Simplified - in reality you'd parse JWT or similar
+	}
+	
+	return "unknown_session"
+}
+
+// getTokenFromRequest extracts token from request
+func getTokenFromRequest(r *http.Request) string {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
+		// Handle Bearer tokens
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			return authHeader[7:]
+		}
+		// Handle basic tokens
+		return authHeader
+	}
+	
+	// Check for other token headers
+	token := r.Header.Get("X-API-Token")
+	if token != "" {
+		return token
+	}
+	
+	token = r.Header.Get("X-Auth-Token")
+	if token != "" {
+		return token
+	}
+	
+	return ""
 }
 
 // extractPaths extracts paths from attack nodes
