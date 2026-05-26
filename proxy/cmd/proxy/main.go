@@ -86,6 +86,55 @@ func classifyRequest(next http.Handler) http.Handler {
 	})
 }
 
+// maskSensitiveData implements data minimization by masking non-critical segments
+func maskSensitiveData(data string) string {
+	// Simple implementation - in a real system this would be more sophisticated
+	if len(data) > 10 {
+		return data[:3] + "..." + data[len(data)-3:]
+	}
+	return data
+}
+
+// popiaCompliance middleware checks POPIA compliance
+func popiaCompliance(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Extract POPIA-related headers
+		purpose := r.Header.Get("X-PopIA-Purpose")
+		consent := r.Header.Get("X-PopIA-Consent")
+		retentionStr := r.Header.Get("X-PopIA-Retention")
+		
+		// If no POPIA headers are present, default to safe values
+		if purpose == "" {
+			purpose = "CUSTOMER_SERVICE" // default safe purpose
+		}
+		
+		consentGiven := consent == "true"
+		retentionPeriod := 30 // default retention period in days
+		if retentionStr != "" {
+			// In a real implementation, you would parse the retention period
+			// For now, we'll just use the default
+		}
+		
+		// Perform POPIA compliance check
+		allowed, err := opa.CheckPopiaCompliance(purpose, []string{"basic_data"}, consentGiven, retentionPeriod)
+		if err != nil {
+			log.Printf("POPIA compliance check error: %v", err)
+			http.Error(w, "Compliance check failed", http.StatusInternalServerError)
+			return
+		}
+		
+		// If POPIA compliance fails, block the request
+		if !allowed {
+			log.Printf("Request blocked by POPIA compliance: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "Request violates POPIA compliance", http.StatusForbidden)
+			return
+		}
+		
+		// If compliant, continue processing
+		next.ServeHTTP(w, r)
+	})
+}
+
 // checkOPAPolicy middleware checks the OPA policy decision
 func checkOPAPolicy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +144,7 @@ func checkOPAPolicy(next http.Handler) http.Handler {
 			"method": r.Method,
 			"host":   r.Host,
 			"ip":     getClientIP(r),
+			"purpose": r.Header.Get("X-PopIA-Purpose"), // Include purpose for POPIA checks
 		}
 		
 		// Query OPA for policy decision
@@ -157,6 +207,12 @@ func routeToBackend(w http.ResponseWriter, r *http.Request) {
 	// Create a reverse proxy
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	
+	// Suggestion: Modify response to apply masking logic if necessary
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		// Logic to intercept body and apply maskSensitiveData could go here
+		return nil
+	}
+
 	// Log the routing action
 	log.Printf("Routing request to backend: %s", backendURL)
 	
@@ -181,12 +237,15 @@ func main() {
 	// 1. Apply Secure Headers
 	// 2. Check Rate Limiter
 	// 3. Classify Request (get Tier)
-	// 4. Query OPA (get decision)
-	// 5. Route to backend or Block
+	// 4. POPIA Compliance Check
+	// 5. Query OPA (get decision)
+	// 6. Route to backend or Block
 	handler := middleware.ApplySecureHeaders(
 		rateLimit(
 			classifyRequest(
-				checkOPAPolicy(mux),
+				popiaCompliance(
+					checkOPAPolicy(mux),
+				),
 			),
 		),
 	)
