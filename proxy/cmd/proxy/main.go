@@ -18,6 +18,11 @@ import (
 	"immunisoc-nexus/proxy/internal/opa"
 )
 
+const (
+	// Shared secret for Proxy-to-Backend authentication
+	HandshakeSecretToken = "your-secret-token-here" // In production, load from environment/config
+)
+
 // rateLimiterMap stores rate limiters per IP address
 var (
 	rateLimiterMap = make(map[string]*rate.Limiter)
@@ -86,13 +91,9 @@ func classifyRequest(next http.Handler) http.Handler {
 	})
 }
 
-// maskSensitiveData implements data minimization by masking non-critical segments
-func maskSensitiveData(data string) string {
-	// Simple implementation - in a real system this would be more sophisticated
-	if len(data) > 10 {
-		return data[:3] + "..." + data[len(data)-3:]
-	}
-	return data
+// authenticateRequest middleware adds HMAC-based authentication
+func authenticateRequest(next http.Handler) http.Handler {
+	return middleware.ApplyAuthentication(HandshakeSecretToken)(next)
 }
 
 // popiaCompliance middleware checks POPIA compliance
@@ -167,6 +168,15 @@ func checkOPAPolicy(next http.Handler) http.Handler {
 	})
 }
 
+// maskSensitiveData implements data minimization by masking non-critical segments
+func maskSensitiveData(data string) string {
+	// Simple implementation - in a real system this would be more sophisticated
+	if len(data) > 10 {
+		return data[:3] + "..." + data[len(data)-3:]
+	}
+	return data
+}
+
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
 	// Get IP from X-Forwarded-For header if present
@@ -207,12 +217,6 @@ func routeToBackend(w http.ResponseWriter, r *http.Request) {
 	// Create a reverse proxy
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	
-	// Suggestion: Modify response to apply masking logic if necessary
-	proxy.ModifyResponse = func(resp *http.Response) error {
-		// Logic to intercept body and apply maskSensitiveData could go here
-		return nil
-	}
-
 	// Log the routing action
 	log.Printf("Routing request to backend: %s", backendURL)
 	
@@ -235,16 +239,19 @@ func main() {
 
 	// Apply middleware stack in the specified order:
 	// 1. Apply Secure Headers
-	// 2. Check Rate Limiter
-	// 3. Classify Request (get Tier)
-	// 4. POPIA Compliance Check
-	// 5. Query OPA (get decision)
-	// 6. Route to backend or Block
+	// 2. Authenticate Request (add HMAC signatures)
+	// 3. Check Rate Limiter
+	// 4. Classify Request (get Tier)
+	// 5. POPIA Compliance Check
+	// 6. Query OPA (get decision)
+	// 7. Route to backend or Block
 	handler := middleware.ApplySecureHeaders(
-		rateLimit(
-			classifyRequest(
-				popiaCompliance(
-					checkOPAPolicy(mux),
+		authenticateRequest(
+			rateLimit(
+				classifyRequest(
+					popiaCompliance(
+						checkOPAPolicy(mux),
+					),
 				),
 			),
 		),
