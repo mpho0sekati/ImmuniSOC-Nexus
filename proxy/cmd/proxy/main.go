@@ -20,11 +20,6 @@ import (
 	"immunisoc-nexus/proxy/internal/opa"
 )
 
-const (
-	// Shared secret for Proxy-to-Backend authentication
-	HandshakeSecretToken = "your-secret-token-here" // In production, load from environment/config
-)
-
 // Global instances for deception and tracking
 var (
 	deceptionGen *deception.Generator
@@ -227,8 +222,10 @@ func generateFakeToken() string {
 }
 
 // authenticateRequest middleware adds HMAC-based authentication
-func authenticateRequest(next http.Handler) http.Handler {
-	return middleware.ApplyAuthentication(HandshakeSecretToken)(next)
+func authenticateRequest(sharedSecret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return middleware.ApplyAuthentication(sharedSecret)(next)
+	}
 }
 
 // classifyRequest middleware classifies the request based on content
@@ -469,6 +466,12 @@ func logForensicEvent(eventType string, r *http.Request) {
 }
 
 func main() {
+	// Load shared secret for Proxy-to-Backend authentication
+	handshakeSecret := os.Getenv("HANDSHAKE_SECRET_TOKEN")
+	if handshakeSecret == "" {
+		handshakeSecret = "default-secure-dev-token" // Fallback for dev only
+	}
+
 	// Initialize deception elements
 	log.Println("Initializing deception mesh...")
 	
@@ -510,7 +513,7 @@ func main() {
 	handler := middleware.ApplySecureHeaders(
 		injectDeception(
 			detectThreats(
-				authenticateRequest(
+				authenticateRequest(handshakeSecret)(
 					rateLimit(
 						classifyRequest(
 							popiaCompliance(
