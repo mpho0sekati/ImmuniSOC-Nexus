@@ -2,7 +2,23 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+
+const api = axios.create({
+  baseURL: process.env.REACT_APP_PROXY_URL || 'http://localhost:8080',
+});
+
+const emptyArray = [];
+
+async function fetchOrFallback(path, fallback) {
+  try {
+    const response = await api.get(path);
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching ${path}:`, error);
+    return fallback;
+  }
+}
 
 function App() {
   const [metrics, setMetrics] = useState({});
@@ -13,25 +29,17 @@ function App() {
   // Fetch metrics from the proxy
   useEffect(() => {
     const fetchMetrics = async () => {
-      try {
-        // Fetch metrics from the proxy
-        const metricsRes = await axios.get('http://localhost:8080/metrics');
-        setMetrics(metricsRes.data);
+      const [metricsData, pathsData, timelineData, threatsData] = await Promise.all([
+        fetchOrFallback('/metrics', {}),
+        fetchOrFallback('/api/paths', emptyArray),
+        fetchOrFallback('/api/timeline', emptyArray),
+        fetchOrFallback('/api/threats', emptyArray),
+      ]);
 
-        // Fetch bloodhound paths
-        const pathsRes = await axios.get('http://localhost:8080/api/paths'); // Placeholder endpoint
-        setBloodhoundPaths(pathsRes.data);
-
-        // Fetch containment timeline
-        const timelineRes = await axios.get('http://localhost:8080/api/timeline'); // Placeholder endpoint
-        setContainmentTimeline(timelineRes.data);
-
-        // Fetch threats
-        const threatsRes = await axios.get('http://localhost:8080/api/threats'); // Placeholder endpoint
-        setThreats(threatsRes.data);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      }
+      setMetrics(metricsData);
+      setBloodhoundPaths(Array.isArray(pathsData) ? pathsData : emptyArray);
+      setContainmentTimeline(Array.isArray(timelineData) ? timelineData : emptyArray);
+      setThreats(Array.isArray(threatsData) ? threatsData : emptyArray);
     };
 
     fetchMetrics();
@@ -75,19 +83,19 @@ function App() {
         <div className="metrics-grid">
           <div className="metric-card">
             <h3>Active Threats</h3>
-            <p className="metric-value">{metrics.activeThreats || 0}</p>
+            <p className="metric-value">{metrics.activeThreats ?? metrics.total_threats_processed ?? 0}</p>
           </div>
           <div className="metric-card">
             <h3>Blocked Requests</h3>
-            <p className="metric-value">{metrics.blockedRequests || 0}</p>
+            <p className="metric-value">{metrics.blockedRequests ?? metrics.total_ip_blocks ?? 0}</p>
           </div>
           <div className="metric-card">
             <h3>Honeytoken Hits</h3>
-            <p className="metric-value">{metrics.honeytokenHits || 0}</p>
+            <p className="metric-value">{metrics.honeytokenHits ?? 0}</p>
           </div>
           <div className="metric-card">
             <h3>Active Sessions</h3>
-            <p className="metric-value">{metrics.activeSessions || 0}</p>
+            <p className="metric-value">{metrics.activeSessions ?? metrics.active_sessions ?? 0}</p>
           </div>
         </div>
 
@@ -139,9 +147,9 @@ function App() {
               bloodhoundPaths.map((path, index) => (
                 <div key={index} className="path-item">
                   <span className="path-source">{path.source}</span>
-                  <span className="path-arrow">→</span>
+                  <span className="path-arrow">-&gt;</span>
                   <span className="path-target">{path.target}</span>
-                  <span className={`path-severity ${path.severity.toLowerCase()}`}>{path.severity}</span>
+                  <span className={`path-severity ${(path.severity || 'low').toLowerCase()}`}>{path.severity || 'LOW'}</span>
                 </div>
               ))
             ) : (
@@ -178,7 +186,7 @@ function App() {
               threats.map((threat, index) => (
                 <div key={index} className="threat-item">
                   <div className="threat-header">
-                    <span className={`threat-type ${threat.type.toLowerCase()}`}>{threat.type}</span>
+                    <span className={`threat-type ${(threat.type || 'other').toLowerCase()}`}>{threat.type || 'Other'}</span>
                     <span className="threat-ip">{threat.ip}</span>
                     <span className="threat-time">{threat.timestamp}</span>
                   </div>

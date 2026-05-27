@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,8 +10,10 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"immunisoc-nexus/proxy/internal/bloodhound"
@@ -666,10 +669,12 @@ func routeToBackend(w http.ResponseWriter, r *http.Request) {
 // metricsHandler exposes security system metrics
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	metrics := tcellEngine.GetMetrics()
+	highRiskPaths := bloodTracker.GetHighRiskPaths()
+	honeytokenHits := countHoneytrapHits(bloodTracker.GetNodes())
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Create a JSON response with the metrics
+	// Keep the original snake_case keys and add dashboard-friendly camelCase keys.
 	response := map[string]interface{}{
 		"timestamp":                 time.Now().Unix(),
 		"total_threats_processed":   metrics.TotalThreatsProcessed,
@@ -680,6 +685,13 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		"active_blocks":             metrics.ActiveBlocks,
 		"active_sessions":           metrics.ActiveSessions,
 		"revoked_tokens_count":      metrics.RevokedTokensCount,
+		"activeThreats":             len(highRiskPaths),
+		"blockedRequests":           metrics.TotalIPBlocks,
+		"honeytokenHits":            honeytokenHits,
+		"activeSessions":            metrics.ActiveSessions,
+		"totalThreatsProcessed":     metrics.TotalThreatsProcessed,
+		"totalActionsExecuted":      metrics.TotalActionsExecuted,
+		"totalTokensRevoked":        metrics.TotalTokensRevoked,
 	}
 
 	// Encode response as JSON
@@ -688,6 +700,166 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Encoding error", http.StatusInternalServerError)
 		return
 	}
+}
+
+func countHoneytrapHits(nodes []*bloodhound.AttackNode) int {
+	count := 0
+	for _, node := range nodes {
+		if node.IsHoneytrap {
+			count++
+		}
+	}
+	return count
+}
+
+func apiPathsHandler(w http.ResponseWriter, r *http.Request) {
+	paths := bloodTracker.GetHighRiskPaths()
+	response := make([]map[string]interface{}, 0, len(paths))
+
+	for _, path := range paths {
+		response = append(response, map[string]interface{}{
+			"id":         path.ID,
+			"source":     path.StartNode,
+			"target":     path.EndNode,
+			"severity":   strings.ToUpper(path.AlertLevel),
+			"score":      path.Score,
+			"threatType": path.ThreatType,
+			"confidence": path.Confidence,
+			"firstSeen":  path.FirstSeen.Format(time.RFC3339),
+			"lastSeen":   path.LastSeen.Format(time.RFC3339),
+		})
+	}
+
+	writeJSON(w, response)
+}
+
+func apiTimelineHandler(w http.ResponseWriter, r *http.Request) {
+	actions := tcellEngine.GetRecentActions()
+	response := make([]map[string]interface{}, 0, len(actions))
+
+	for _, action := range actions {
+		response = append(response, map[string]interface{}{
+			"timestamp": action.Timestamp.Format(time.RFC3339),
+			"action":    action.ActionType,
+			"target":    action.Target,
+			"severity":  action.Severity,
+			"duration":  action.Duration.String(),
+			"details":   action.Description,
+		})
+	}
+
+	writeJSON(w, response)
+}
+
+func apiThreatsHandler(w http.ResponseWriter, r *http.Request) {
+	paths := bloodTracker.GetRecentAttacks(24)
+	nodes := bloodTracker.GetNodes()
+	response := make([]map[string]interface{}, 0, len(paths))
+
+	for _, path := range paths {
+		sourceIP := findNodeSourceIP(nodes, path.StartNode)
+		response = append(response, map[string]interface{}{
+			"id":          path.ID,
+			"type":        path.ThreatType,
+			"severity":    strings.ToUpper(path.AlertLevel),
+			"ip":          sourceIP,
+			"timestamp":   path.LastSeen.Format(time.RFC3339),
+			"description": fmt.Sprintf("%s detected with score %.1f and confidence %.0f%%", path.ThreatType, path.Score, path.Confidence*100),
+		})
+	}
+
+	writeJSON(w, response)
+}
+
+func findNodeSourceIP(nodes []*bloodhound.AttackNode, nodeID string) string {
+	for _, node := range nodes {
+		if node.ID == nodeID && node.SourceIP != "" {
+			return node.SourceIP
+		}
+	}
+	return "unknown"
+}
+
+func verifyLogHandler(w http.ResponseWriter, r *http.Request) {
+	isValid, corrupted := immutableLogger.VerifyChain()
+	response := map[string]interface{}{
+		"valid":             isValid,
+		"corrupted_indices": corrupted,
+		"log_size":          immutableLogger.GetLogSize(),
+	}
+
+	writeJSON(w, response)
+}
+
+func writeJSON(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("Error encoding JSON response: %v", err)
+		http.Error(w, "Encoding error", http.StatusInternalServerError)
+	}
+}
+
+func applyCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if isAllowedOrigin(origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Token, X-Auth-Token, X-PopIA-Purpose, X-PopIA-Consent, X-PopIA-Retention")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isAllowedOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+
+	allowedOrigins := []string{
+		"http://localhost:3000",
+		"http://127.0.0.1:3000",
+	}
+
+	if configured := strings.TrimSpace(os.Getenv("DASHBOARD_ALLOWED_ORIGINS")); configured != "" {
+		allowedOrigins = strings.Split(configured, ",")
+	}
+
+	for _, allowed := range allowedOrigins {
+		if strings.TrimSpace(allowed) == origin {
+			return true
+		}
+	}
+	return false
+}
+
+func buildProxyHandler(final http.Handler, handshakeSecret string) http.Handler {
+	return verbWhitelist(
+		middleware.ApplySecureHeaders(
+			injectDeception(
+				detectThreats(
+					authenticateRequest(handshakeSecret)(
+						rateLimit(
+							classifyRequest(
+								popiaCompliance(
+									checkOPAPolicy(final),
+								),
+							),
+						),
+					),
+				),
+			),
+		),
+	)
 }
 
 // logForensicEvent logs events for forensic analysis in append-only format
@@ -766,67 +938,23 @@ func main() {
 	// Create a new mux router
 	mux := http.NewServeMux()
 
-	// Register the metrics endpoint
+	// Observability endpoints stay outside the full proxy policy chain so the
+	// dashboard remains usable when OPA or the backend is unavailable.
 	mux.HandleFunc("/metrics", metricsHandler)
-
-	// Register the POPIA report endpoint
 	mux.HandleFunc("/popia-report", popiaReportHandler)
-
-	// Register the immutable log verification endpoint
-	mux.HandleFunc("/verify-log", func(w http.ResponseWriter, r *http.Request) {
-		isValid, corrupted := immutableLogger.VerifyChain()
-		response := map[string]interface{}{
-			"valid":             isValid,
-			"corrupted_indices": corrupted,
-			"log_size":          immutableLogger.GetLogSize(),
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	})
+	mux.HandleFunc("/verify-log", verifyLogHandler)
+	mux.HandleFunc("/api/paths", apiPathsHandler)
+	mux.HandleFunc("/api/timeline", apiTimelineHandler)
+	mux.HandleFunc("/api/threats", apiThreatsHandler)
 
 	// Define a handler that implements the complete flow
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// This handler will be wrapped by all the middleware layers
-		routeToBackend(w, r)
-	})
-
-	// Apply middleware stack in the specified order:
-	// 1. Verb whitelist (early filtering)
-	// 2. Apply Secure Headers
-	// 3. Inject Deception Elements
-	// 4. Detect Threats (passive threat detection)
-	// 5. Authenticate Request (add HMAC signatures)
-	// 6. Check Rate Limiter
-	// 7. Classify Request (get Tier)
-	// 8. POPIA Compliance Check
-	// 9. Query OPA (get decision)
-	// 10. Egress Protection (data exfiltration prevention)
-	// 11. Route to backend or Block
-	handler := verbWhitelist(
-		middleware.ApplySecureHeaders(
-			injectDeception(
-				detectThreats(
-					authenticateRequest(handshakeSecret)(
-						rateLimit(
-							classifyRequest(
-								popiaCompliance(
-									checkOPAPolicy(
-										middleware.EgressFilter(mux), // Add egress protection before routing
-									),
-								),
-							),
-						),
-					),
-				),
-			),
-		),
-	)
+	proxyHandler := buildProxyHandler(http.HandlerFunc(routeToBackend), handshakeSecret)
+	mux.Handle("/", proxyHandler)
 
 	// Create a custom server with timeouts
 	server := &http.Server{
 		Addr:         ":8080",
-		Handler:      handler,
+		Handler:      applyCORS(middleware.ApplySecureHeaders(mux)),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -838,6 +966,23 @@ func main() {
 	log.Println("Neutrophil Proxy Membrane Initialized.")
 	log.Printf("Server starting on %s", server.Addr)
 
-	// Start the server
-	log.Fatal(server.ListenAndServe())
+	shutdownSignals := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-shutdownSignals
+		log.Println("Shutdown signal received, draining server and immutable logger...")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("Server shutdown error: %v", err)
+		}
+		immutableLogger.Close()
+	}()
+
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		immutableLogger.Close()
+		log.Fatal(err)
+	}
 }

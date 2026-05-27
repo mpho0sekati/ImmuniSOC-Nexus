@@ -18,15 +18,15 @@ const (
 
 // Metrics holds statistics about the engine's operations
 type Metrics struct {
-	TotalActionsExecuted int64
-	TotalThreatsProcessed int64
-	TotalIPBlocks        int64
+	TotalActionsExecuted    int64
+	TotalThreatsProcessed   int64
+	TotalIPBlocks           int64
 	TotalSessionsTerminated int64
-	TotalTokensRevoked   int64
-	ActiveBlocks         int64
-	ActiveSessions       int64
-	RevokedTokensCount   int64
-	mutex                sync.RWMutex
+	TotalTokensRevoked      int64
+	ActiveBlocks            int64
+	ActiveSessions          int64
+	RevokedTokensCount      int64
+	mutex                   sync.RWMutex
 }
 
 // Logger handles enhanced logging
@@ -60,6 +60,7 @@ type Engine struct {
 	logger         *Logger
 	mutex          sync.RWMutex
 	metrics        *Metrics
+	actionHistory  []ResponseAction
 }
 
 // NewEngine creates a new T-Cell engine instance
@@ -77,7 +78,8 @@ func NewEngine() *Engine {
 		logger: &Logger{
 			enabled: true,
 		},
-		metrics: &Metrics{},
+		metrics:       &Metrics{},
+		actionHistory: make([]ResponseAction, 0, 100),
 	}
 
 	// Start background cleanup for expired IP blocks
@@ -251,7 +253,23 @@ func (e *Engine) ExecuteResponseActions(level ContainmentLevel, targetIP, sessio
 	}
 	e.metrics.mutex.Unlock()
 
+	e.recordActions(actions)
+
 	return actions, nil
+}
+
+func (e *Engine) recordActions(actions []ResponseAction) {
+	if len(actions) == 0 {
+		return
+	}
+
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+
+	e.actionHistory = append(e.actionHistory, actions...)
+	if len(e.actionHistory) > 100 {
+		e.actionHistory = e.actionHistory[len(e.actionHistory)-100:]
+	}
 }
 
 // TerminateSession terminates a specific session
@@ -433,7 +451,7 @@ func (e *Engine) CleanupExpiredBlocks() {
 			delete(e.ipBlocker.blockedIPs, ip)
 		}
 	}
-	
+
 	// Update metrics
 	e.metrics.mutex.Lock()
 	e.metrics.ActiveBlocks = int64(len(e.ipBlocker.blockedIPs))
@@ -510,15 +528,25 @@ func (e *Engine) GetMetrics() *Metrics {
 
 	// Create a copy of metrics to return
 	metricsCopy := &Metrics{
-		TotalActionsExecuted: e.metrics.TotalActionsExecuted,
-		TotalThreatsProcessed: e.metrics.TotalThreatsProcessed,
-		TotalIPBlocks:        e.metrics.TotalIPBlocks,
+		TotalActionsExecuted:    e.metrics.TotalActionsExecuted,
+		TotalThreatsProcessed:   e.metrics.TotalThreatsProcessed,
+		TotalIPBlocks:           e.metrics.TotalIPBlocks,
 		TotalSessionsTerminated: e.metrics.TotalSessionsTerminated,
-		TotalTokensRevoked:   e.metrics.TotalTokensRevoked,
-		ActiveBlocks:         e.metrics.ActiveBlocks,
-		ActiveSessions:       e.metrics.ActiveSessions,
-		RevokedTokensCount:   e.metrics.RevokedTokensCount,
+		TotalTokensRevoked:      e.metrics.TotalTokensRevoked,
+		ActiveBlocks:            e.metrics.ActiveBlocks,
+		ActiveSessions:          e.metrics.ActiveSessions,
+		RevokedTokensCount:      e.metrics.RevokedTokensCount,
 	}
 
 	return metricsCopy
+}
+
+// GetRecentActions returns a snapshot of recent response actions for dashboards.
+func (e *Engine) GetRecentActions() []ResponseAction {
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
+
+	actions := make([]ResponseAction, len(e.actionHistory))
+	copy(actions, e.actionHistory)
+	return actions
 }

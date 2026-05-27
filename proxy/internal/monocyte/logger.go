@@ -1,12 +1,16 @@
 package monocyte
 
 import (
+	"bufio"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -26,23 +30,28 @@ type MonocyteLogger struct {
 	mutex       sync.RWMutex // Using RWMutex for better concurrency
 	logEntries  []LogEntry
 	logFile     string
-	secret      string          // Secret for HMAC signatures
-	lastHash    string          // Hash of the latest entry
-	pendingSave chan []LogEntry // Channel for async file writes (sending batches)
-	stopChan    chan struct{}   // Channel to stop the save goroutine
-	closed      bool            // Flag to prevent double close
-	closeMutex  sync.Mutex      // Mutex to protect close operations
-	wg          sync.WaitGroup  // WaitGroup to ensure background saver finishes
+	secret      string         // Secret for HMAC signatures
+	lastHash    string         // Hash of the latest entry
+	pendingSave chan LogEntry  // Channel for async file writes (sending single entries)
+	stopChan    chan struct{}  // Channel to stop the save goroutine
+	closed      bool           // Flag to prevent double close
+	closeMutex  sync.Mutex     // Mutex to protect close operations
+	wg          sync.WaitGroup // WaitGroup to ensure background saver finishes
 }
 
 // NewMonocyteLogger creates a new immutable logger instance
-// NewMonocyteLogger creates a new immutable logger instance
 func NewMonocyteLogger(logFile string, secret string) *MonocyteLogger {
+	if dir := filepath.Dir(logFile); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("[MONOCYTE ERROR] Failed to create log directory %s: %v", dir, err)
+		}
+	}
+
 	logger := &MonocyteLogger{
 		logEntries:  make([]LogEntry, 0),
 		logFile:     logFile,
-		lastHash:    "",                           // Genesis block has no previous hash
-		pendingSave: make(chan []LogEntry, 100), // Buffer up to 100 pending save batches
+		lastHash:    "",                        // Genesis block has no previous hash
+		pendingSave: make(chan LogEntry, 1000), // Buffer up to 1000 pending entries
 		stopChan:    make(chan struct{}),
 		closed:      false,
 		secret:      secret,
@@ -61,44 +70,51 @@ func NewMonocyteLogger(logFile string, secret string) *MonocyteLogger {
 // backgroundSaver runs in a separate goroutine to handle file I/O
 func (ml *MonocyteLogger) backgroundSaver() {
 	defer ml.wg.Done()
-	
+
+	// Open the file once in append mode for the lifetime of the saver
+	f, err := os.OpenFile(ml.logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("[MONOCYTE ERROR] Failed to open log file for background saving: %v", err)
+		return
+	}
+	defer f.Close()
+
 	for {
 		select {
-		case entries := <-ml.pendingSave:
-			// Perform the file write operation
-			data, err := json.MarshalIndent(entries, "", "  ")
-			if err != nil {
-				// In a real implementation, we'd have better error handling
-				continue
-			}
-			
-			// Write to file
-			err = os.WriteFile(ml.logFile, data, 0644)
-			if err != nil {
-				// In a real implementation, we'd have better error handling
-				continue
+		case entry := <-ml.pendingSave:
+			if err := ml.writeEntry(f, entry); err != nil {
+				log.Printf("[MONOCYTE ERROR] Failed to persist log entry %d: %v", entry.Index, err)
 			}
 		case <-ml.stopChan:
 			// Drain any remaining items in the channel before exiting
 			for len(ml.pendingSave) > 0 {
-				entries := <-ml.pendingSave
-				// Perform the file write operation
-				data, err := json.MarshalIndent(entries, "", "  ")
-				if err != nil {
-					// In a real implementation, we'd have better error handling
-					continue
+				entry := <-ml.pendingSave
+				if err := ml.writeEntry(f, entry); err != nil {
+					log.Printf("[MONOCYTE ERROR] Failed to persist log entry %d during shutdown: %v", entry.Index, err)
 				}
-				
-				// Write to file
-				err = os.WriteFile(ml.logFile, data, 0644)
-				if err != nil {
-					// In a real implementation, we'd have better error handling
-					continue
-				}
+			}
+			if err := f.Sync(); err != nil {
+				log.Printf("[MONOCYTE ERROR] Failed to sync log file during shutdown: %v", err)
 			}
 			return
 		}
 	}
+}
+
+func (ml *MonocyteLogger) writeEntry(f *os.File, entry LogEntry) error {
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte("\n")); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Append adds a new entry to the immutable log
@@ -143,28 +159,17 @@ func (ml *MonocyteLogger) Append(data string) error {
 	ml.logEntries = append(ml.logEntries, newEntry)
 	ml.lastHash = currentHash
 
-	// Create a copy of the entries to send to the background saver
-	entriesCopy := make([]LogEntry, len(ml.logEntries))
-	copy(entriesCopy, ml.logEntries)
-
-	// Send to background saver (non-blocking due to buffered channel)
-	select {
-	case ml.pendingSave <- entriesCopy:
-		// Successfully sent to background saver
-	default:
-		// Channel is full, but we've already updated in-memory state
-		// This is acceptable for an append-only log where durability is eventually guaranteed
-	}
+	// Block instead of dropping when the buffer is full. Forensic logs should
+	// prefer backpressure over silent persistence loss.
+	ml.pendingSave <- newEntry
 
 	return nil
 }
 
-// writeEntryToFile writes a single entry as a JSON line
-
 // GetEntries returns all log entries
 func (ml *MonocyteLogger) GetEntries() []LogEntry {
-	ml.mutex.Lock()
-	defer ml.mutex.Unlock()
+	ml.mutex.RLock()
+	defer ml.mutex.RUnlock()
 
 	// Return a copy to prevent external modification
 	entries := make([]LogEntry, len(ml.logEntries))
@@ -174,8 +179,8 @@ func (ml *MonocyteLogger) GetEntries() []LogEntry {
 
 // GetEntry returns a specific log entry by index
 func (ml *MonocyteLogger) GetEntry(index int64) (*LogEntry, error) {
-	ml.mutex.Lock()
-	defer ml.mutex.Unlock()
+	ml.mutex.RLock()
+	defer ml.mutex.RUnlock()
 
 	if index < 0 || index >= int64(len(ml.logEntries)) {
 		return nil, fmt.Errorf("entry index %d out of range", index)
@@ -214,7 +219,7 @@ func (ml *MonocyteLogger) VerifyChain() (bool, []int) {
 				valid = false
 			}
 		}
-		
+
 		// Verify the HMAC signature
 		h := hmac.New(sha256.New, []byte(ml.secret))
 		h.Write([]byte(expectedData))
@@ -230,27 +235,27 @@ func (ml *MonocyteLogger) VerifyChain() (bool, []int) {
 
 // loadFromFile loads log entries from the persistent storage file
 func (ml *MonocyteLogger) loadFromFile() error {
-	data, err := os.ReadFile(ml.logFile)
+	file, err := os.Open(ml.logFile)
 	if err != nil {
-		// If file doesn't exist, that's okay - start fresh
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
-
-	if len(data) == 0 {
-		return nil
-	}
+	defer file.Close()
 
 	var entries []LogEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return err
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var entry LogEntry
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil {
+			entries = append(entries, entry)
+		}
 	}
 
 	ml.mutex.Lock()
 	defer ml.mutex.Unlock()
-	
+
 	ml.logEntries = entries
 
 	// Update lastHash to the hash of the final entry
@@ -276,7 +281,6 @@ func (ml *MonocyteLogger) Close() {
 	ml.wg.Wait()
 }
 
-
 // GeneratePOPIABreachReport generates a POPIA-compliant breach report from the log
 func (ml *MonocyteLogger) GeneratePOPIABreachReport() (string, error) {
 	// We'll call VerifyChain which will acquire its own lock
@@ -285,11 +289,11 @@ func (ml *MonocyteLogger) GeneratePOPIABreachReport() (string, error) {
 		return "", fmt.Errorf("log chain is corrupted at indices: %v", corruptedIndices)
 	}
 
-	// Get a snapshot of entries with proper locking
-	ml.mutex.Lock()
+	// Get a snapshot of entries with proper read locking
+	ml.mutex.RLock()
 	entries := make([]LogEntry, len(ml.logEntries))
 	copy(entries, ml.logEntries)
-	ml.mutex.Unlock()
+	ml.mutex.RUnlock()
 
 	// Filter entries that are relevant to POPIA breach reporting
 	var breachEvents []LogEntry
@@ -323,76 +327,27 @@ func containsPOPIARelevantTerms(data string) bool {
 		"sensitive_data", "personal_information", "PII", "identifiable",
 	}
 
+	lowerData := strings.ToLower(data)
 	for _, term := range terms {
-		if containsIgnoreCase(data, term) {
+		if strings.Contains(lowerData, strings.ToLower(term)) {
 			return true
 		}
 	}
 	return false
-}
-
-// containsIgnoreCase checks if a string contains a substring ignoring case
-func containsIgnoreCase(str, substr string) bool {
-	return len(str) >= len(substr) && 
-		   (str == substr || 
-		    containsIgnoreCaseHelper(str, substr))
-}
-
-// containsIgnoreCaseHelper is a helper for case-insensitive string comparison
-func containsIgnoreCaseHelper(str, substr string) bool {
-	sLen := len(str)
-	subLen := len(substr)
-	if subLen == 0 {
-		return true
-	}
-	if sLen < subLen {
-		return false
-	}
-	
-	strLower := toLowerSimple(str)
-	substrLower := toLowerSimple(substr)
-	
-	for i := 0; i <= sLen-subLen; i++ {
-		match := true
-		for j := 0; j < subLen; j++ {
-			if strLower[i+j] != substrLower[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
-
-// toLowerSimple converts a string to lowercase using a simple approach
-func toLowerSimple(s string) string {
-	result := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			result[i] = c + ('a' - 'A')
-		} else {
-			result[i] = c
-		}
-	}
-	return string(result)
 }
 
 // GetLogSize returns the number of entries in the log
 func (ml *MonocyteLogger) GetLogSize() int {
-	ml.mutex.Lock()
-	defer ml.mutex.Unlock()
+	ml.mutex.RLock()
+	defer ml.mutex.RUnlock()
 
 	return len(ml.logEntries)
 }
 
 // VerifyEntry verifies the integrity of a specific entry
 func (ml *MonocyteLogger) VerifyEntry(index int64) (bool, error) {
-	ml.mutex.Lock()
-	defer ml.mutex.Unlock()
+	ml.mutex.RLock()
+	defer ml.mutex.RUnlock()
 
 	if index < 0 || index >= int64(len(ml.logEntries)) {
 		return false, fmt.Errorf("entry index %d out of range", index)
@@ -405,8 +360,12 @@ func (ml *MonocyteLogger) VerifyEntry(index int64) (bool, error) {
 	expectedHashBytes := sha256.Sum256([]byte(expectedData))
 	expectedHash := hex.EncodeToString(expectedHashBytes[:])
 
-	// Check if the stored hash matches the calculated hash
-	isValid := entry.Hash == expectedHash
+	// Verify Hash and Signature
+	h := hmac.New(sha256.New, []byte(ml.secret))
+	h.Write([]byte(expectedData))
+	expectedSignature := hex.EncodeToString(h.Sum(nil))
+
+	isValid := entry.Hash == expectedHash && entry.Signature == expectedSignature
 
 	// For non-genesis entries, also check the prevHash relationship
 	if isValid && index > 0 {

@@ -1,0 +1,32 @@
+# Build outputs
+*.exe
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+build/
+
+# Go
+.gocache/
+coverage.out
+
+# Node / React dashboard
+dashboard/node_modules/
+dashboard/build/
+
+# Python
+immunesoc-env/
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Runtime logs and generated test logs
+logs/
+internal/monocyte/test_log_*.json
+
+# Local environment
+.env
+.env.*
+!.env.example

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -22,8 +24,9 @@ type PolicyResponse struct {
 
 // OpaClient handles communication with the OPA service
 type OpaClient struct {
-	client  *http.Client
-	baseURL string
+	client   *http.Client
+	baseURL  string
+	blockURL string
 }
 
 // NewOpaClient creates a new OPA client with low-latency settings
@@ -34,9 +37,18 @@ func NewOpaClient() *OpaClient {
 	}
 
 	return &OpaClient{
-		client:  httpClient,
-		baseURL: "http://opa:8181/v1/data/authz/allow",
+		client:   httpClient,
+		baseURL:  envOrDefault("OPA_POLICY_URL", "http://opa:8181/v1/data/authz/allow"),
+		blockURL: envOrDefault("OPA_BLOCK_POLICY_URL", "http://opa:8181/v1/data/authz/block_egress"),
 	}
+}
+
+func envOrDefault(key string, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 // Global client instance for reuse
@@ -126,8 +138,6 @@ func CheckEgressBlockPolicy(destination string, payload string, purpose string) 
 
 	// Try to check the block_egress policy specifically
 	// This assumes there's a specific endpoint for block policies
-	blockURL := "http://opa:8181/v1/data/authz/block_egress"
-	
 	requestBody := struct {
 		Input map[string]interface{} `json:"input"`
 	}{
@@ -142,7 +152,7 @@ func CheckEgressBlockPolicy(destination string, payload string, purpose string) 
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Millisecond)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", blockURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", defaultClient.blockURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return false, fmt.Errorf("failed to create block request: %w", err)
 	}
@@ -180,16 +190,16 @@ func classifyEgressData(data string) string {
 	if len(data) > 10000 { // Large data sets might be critical
 		return "CRITICAL"
 	}
-	
+
 	if containsAny(data, []string{"confidential", "private", "restricted"}) {
 		return "CRITICAL"
 	}
-	
+
 	// Check for sensitive patterns
 	if containsAny(data, []string{"ssn", "social security", "credit card", "password", "api key", "secret", "token"}) {
 		return "CRITICAL"
 	}
-	
+
 	return "STANDARD"
 }
 
