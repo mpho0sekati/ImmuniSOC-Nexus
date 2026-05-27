@@ -13,21 +13,57 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/time/rate"
 	"immunisoc-nexus/proxy/internal/bloodhound"
 	"immunisoc-nexus/proxy/internal/classification"
 	"immunisoc-nexus/proxy/internal/deception"
 	"immunisoc-nexus/proxy/internal/middleware"
+	"immunisoc-nexus/proxy/internal/monocyte" // Import for immutable logging
 	"immunisoc-nexus/proxy/internal/opa"
 	"immunisoc-nexus/proxy/internal/tcell"
+
+	"golang.org/x/time/rate"
 )
+
+// Package main implements the Neutrophil Proxy Membrane for the ImmuniSOC-Nexus platform
+//
+// ImmuniSOC-Nexus: Next-Gen Zero Trust Network Security
+// =====================================================
+//
+// Overview:
+// ImmuniSOC-Nexus is a cutting-edge cybersecurity platform that combines advanced
+// deception techniques, automated response mechanisms, and cryptographic logging
+// to provide comprehensive network security with autonomous healing capabilities.
+//
+// Updates:
+// ========
+// May 27, 2026 - Monocyte Immutable Logging Implementation
+// - Added cryptographic append-only logs with hash chaining
+// - Implemented tamper-evident structure with integrity verification
+// - Created POPIA breach report generation capability
+// - Added asynchronous file I/O with synchronous shutdown
+// - Developed comprehensive test suite for the logging system
+//
+// Earlier Updates:
+// - Implemented T-Cell Self-Healing Engine with autonomous response mechanisms
+// - Enhanced egress protection with data sanitization and sensitive data pattern matching
+// - Improved OPA policy enforcement with threat-based blocking
+// - Added comprehensive test suites for core security components
+// - Fixed resource leaks and improved error handling throughout the system
+//
+// Core Components:
+// ================
+// 1. Neutrophil Proxy Membrane - Advanced threat detection and access control
+// 2. BloodHound Tracker - Network topology mapping and behavioral analysis
+// 3. Deception Generator - Honeytoken and decoy endpoint generation
+// 4. T-Cell Self-Healing Engine - Autonomous threat response
+// 5. Monocyte Immutable Logging - Cryptographic append-only logs
 
 // Constants for configuration
 const (
 	DefaultHandshakeSecret = "default-secure-dev-token" // Only for development
-	MaxLogLength          = 1000
-	MinRetentionPeriod    = 1  // days
-	MaxRetentionPeriod    = 365 // days
+	MaxLogLength           = 1000
+	MinRetentionPeriod     = 1   // days
+	MaxRetentionPeriod     = 365 // days
 )
 
 // Global instances for deception, tracking, and healing
@@ -43,11 +79,26 @@ var (
 	mu             sync.Mutex
 )
 
+// Global logger instances
+var (
+	immutableLogger *monocyte.MonocyteLogger
+)
+
 // Initialize deception, tracking, and healing systems
 func init() {
 	deceptionGen = deception.NewGenerator("canary")
 	bloodTracker = bloodhound.NewTracker()
 	tcellEngine = tcell.NewEngine()
+
+	// Get secret from environment for the logger
+	secret := os.Getenv("HANDSHAKE_SECRET_TOKEN")
+	if secret == "" {
+		secret = DefaultHandshakeSecret
+	}
+	immutableLogger = monocyte.NewMonocyteLogger("./logs/security_immutable.log", secret)
+
+	// Log system initialization
+	immutableLogger.Append("System initialized at " + time.Now().Format(time.RFC3339))
 }
 
 // getRateLimiter retrieves or creates a rate limiter for a given IP
@@ -129,10 +180,10 @@ func detectThreats(next http.Handler) http.Handler {
 
 			// Process threat with T-Cell
 			threatDetails := map[string]interface{}{
-				"threat_type":       "directory_traversal",
-				"detection_method":  "pattern_match",
-				"request_path":      r.URL.Path,
-				"request_query":     r.URL.RawQuery,
+				"threat_type":      "directory_traversal",
+				"detection_method": "pattern_match",
+				"request_path":     r.URL.Path,
+				"request_query":    r.URL.RawQuery,
 			}
 			level := tcell.Critical // Directory traversal is critical
 			actions, err := tcellEngine.ProcessThreat(ip, sessionID, token, level, threatDetails)
@@ -156,10 +207,10 @@ func detectThreats(next http.Handler) http.Handler {
 
 			// Process threat with T-Cell
 			threatDetails := map[string]interface{}{
-				"threat_type":       "honeytrap_access",
-				"detection_method":  "canary_token",
-				"request_path":      r.URL.Path,
-				"user_agent":        r.UserAgent(),
+				"threat_type":      "honeytrap_access",
+				"detection_method": "canary_token",
+				"request_path":     r.URL.Path,
+				"user_agent":       r.UserAgent(),
 			}
 			level := tcell.Critical // Honeytrap access is critical
 			actions, err := tcellEngine.ProcessThreat(ip, sessionID, token, level, threatDetails)
@@ -176,7 +227,7 @@ func detectThreats(next http.Handler) http.Handler {
 
 		// Track normal request in bloodhound
 		bloodTracker.TrackRequest(r, false)
-		
+
 		// Continue with the next handler if no threats detected
 		next.ServeHTTP(w, r)
 	})
@@ -218,7 +269,7 @@ func hasCanaryToken(r *http.Request) bool {
 		if strings.Contains(headerName, "canary") || strings.Contains(headerName, "honey") {
 			return true
 		}
-		
+
 		for _, value := range values {
 			lowerValue := strings.ToLower(value)
 			if strings.Contains(lowerValue, "canary-token") ||
@@ -263,10 +314,10 @@ func injectDeception(next http.Handler) http.Handler {
 
 			// Process threat with T-Cell
 			threatDetails := map[string]interface{}{
-				"threat_type":       "decoy_endpoint_access",
-				"detection_method":  "path_match",
-				"request_path":      r.URL.Path,
-				"user_agent":        r.UserAgent(),
+				"threat_type":      "decoy_endpoint_access",
+				"detection_method": "path_match",
+				"request_path":     r.URL.Path,
+				"user_agent":       r.UserAgent(),
 			}
 			level := tcell.High // Decoy endpoint access is high risk
 			actions, err := tcellEngine.ProcessThreat(ip, sessionID, token, level, threatDetails)
@@ -275,15 +326,15 @@ func injectDeception(next http.Handler) http.Handler {
 			} else {
 				log.Printf("T-Cell executed %d actions for threat from IP %s", len(actions), ip)
 			}
-			
+
 			// Generate fake response for decoy endpoint
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, `{"status": "success", "message": "Access granted to decoy endpoint", "token": "%s", "timestamp": "%d"}`, 
+			fmt.Fprintf(w, `{"status": "success", "message": "Access granted to decoy endpoint", "token": "%s", "timestamp": "%d"}`,
 				generateFakeToken(), time.Now().Unix())
 			return
 		}
-		
+
 		// For normal requests, add subtle deception elements to responses
 		next.ServeHTTP(w, r)
 	})
@@ -321,17 +372,17 @@ func classifyRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Create a classifier instance
 		classifier := &classification.Classifier{}
-		
+
 		// Classify the request path
 		tier, cleanedPath := classifier.Classify(r.URL.Path)
-		
+
 		// Log the classification tier for monitoring
 		log.Printf("Request classified with tier: %d, cleaned path: %s", tier, cleanedPath)
-		
+
 		// Store the tier in the request context for later use
 		// In a real implementation, you'd use context.WithValue to store the tier
 		// For now, we'll just continue with the classification
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -352,19 +403,19 @@ func popiaCompliance(next http.Handler) http.Handler {
 		purpose := r.Header.Get("X-PopIA-Purpose")
 		consent := r.Header.Get("X-PopIA-Consent")
 		retentionStr := r.Header.Get("X-PopIA-Retention")
-		
+
 		// If no POPIA headers are present, default to safe values
 		if purpose == "" {
 			purpose = "CUSTOMER_SERVICE" // default safe purpose
 		}
-		
+
 		consentGiven := consent == "true"
 		retentionPeriod := 30 // default retention period in days
 		if retentionStr != "" {
 			// In a real implementation, you would parse the retention period
 			// For now, we'll just use the default
 		}
-		
+
 		// Perform POPIA compliance check
 		allowed, err := opa.CheckPopiaCompliance(purpose, []string{"basic_data"}, consentGiven, retentionPeriod)
 		if err != nil {
@@ -372,14 +423,14 @@ func popiaCompliance(next http.Handler) http.Handler {
 			http.Error(w, "Compliance check failed", http.StatusInternalServerError)
 			return
 		}
-		
+
 		// If POPIA compliance fails, block the request
 		if !allowed {
 			log.Printf("Request blocked by POPIA compliance: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "Request violates POPIA compliance", http.StatusForbidden)
 			return
 		}
-		
+
 		// If compliant, continue processing
 		next.ServeHTTP(w, r)
 	})
@@ -391,20 +442,20 @@ func checkOPAPolicy(next http.Handler) http.Handler {
 		// Prepare input for OPA policy evaluation
 		nodes := bloodTracker.GetNodes()
 		highRiskPaths := bloodTracker.GetHighRiskPaths()
-		
+
 		input := map[string]interface{}{
-			"path":            r.URL.Path,
-			"method":          r.Method,
-			"host":            r.Host,
-			"ip":              getClientIP(r),
-			"purpose":         r.Header.Get("X-PopIA-Purpose"), // Include purpose for POPIA checks
-			"previous_paths":  extractPaths(nodes),
-			"risk_score":      calculateRiskScore(highRiskPaths),
-			"threat_type":     determineThreatType(highRiskPaths),
-			"confidence":      calculateConfidence(highRiskPaths),
+			"path":              r.URL.Path,
+			"method":            r.Method,
+			"host":              r.Host,
+			"ip":                getClientIP(r),
+			"purpose":           r.Header.Get("X-PopIA-Purpose"), // Include purpose for POPIA checks
+			"previous_paths":    extractPaths(nodes),
+			"risk_score":        calculateRiskScore(highRiskPaths),
+			"threat_type":       determineThreatType(highRiskPaths),
+			"confidence":        calculateConfidence(highRiskPaths),
 			"attack_path_score": calculateAttackPathScore(highRiskPaths),
 		}
-		
+
 		// Query OPA for policy decision
 		allowed, err := opa.CheckPolicy(input)
 		if err != nil {
@@ -412,23 +463,23 @@ func checkOPAPolicy(next http.Handler) http.Handler {
 			http.Error(w, "Policy check failed", http.StatusInternalServerError)
 			return
 		}
-		
+
 		// If OPA denies the request, block it
 		if !allowed {
 			// Process threat with T-Cell when OPA blocks the request
 			ip := getClientIP(r)
 			sessionID := getSessionID(r)
 			token := getTokenFromRequest(r)
-			
+
 			threatDetails := map[string]interface{}{
-				"threat_type":         "opa_policy_block",
-				"opa_risk_score":      input["risk_score"],
-				"opa_threat_type":     input["threat_type"],
+				"threat_type":           "opa_policy_block",
+				"opa_risk_score":        input["risk_score"],
+				"opa_threat_type":       input["threat_type"],
 				"opa_attack_path_score": input["attack_path_score"],
-				"request_path":        r.URL.Path,
-				"user_agent":          r.UserAgent(),
+				"request_path":          r.URL.Path,
+				"user_agent":            r.UserAgent(),
 			}
-			
+
 			// Determine containment level based on risk factors
 			riskScore, ok := input["risk_score"].(float64)
 			if !ok {
@@ -438,7 +489,7 @@ func checkOPAPolicy(next http.Handler) http.Handler {
 			if !ok {
 				confidence = 0
 			}
-			
+
 			level := tcell.GetContainmentLevel(riskScore, confidence, "opa_block")
 			actions, err := tcellEngine.ProcessThreat(ip, sessionID, token, level, threatDetails)
 			if err != nil {
@@ -446,12 +497,12 @@ func checkOPAPolicy(next http.Handler) http.Handler {
 			} else {
 				log.Printf("T-Cell executed %d actions for OPA-blocked request from IP %s", len(actions), ip)
 			}
-			
+
 			log.Printf("Request blocked by OPA policy: %s %s", r.Method, r.URL.Path)
 			http.Error(w, "Access denied by policy", http.StatusForbidden)
 			return
 		}
-		
+
 		// If allowed, continue processing
 		next.ServeHTTP(w, r)
 	})
@@ -465,13 +516,13 @@ func getClientIP(r *http.Request) string {
 		ips := strings.Split(forwarded, ",")
 		return strings.TrimSpace(ips[0])
 	}
-	
+
 	// Get IP from X-Real-IP header if present
 	realIP := r.Header.Get("X-Real-IP")
 	if realIP != "" {
 		return realIP
 	}
-	
+
 	// Fallback to RemoteAddr
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	return host
@@ -483,12 +534,12 @@ func getSessionID(r *http.Request) string {
 	if err == nil && sessionCookie != nil {
 		return sessionCookie.Value
 	}
-	
+
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {
 		return authHeader // Simplified - in reality you'd parse JWT or similar
 	}
-	
+
 	return "unknown_session"
 }
 
@@ -503,18 +554,18 @@ func getTokenFromRequest(r *http.Request) string {
 		// Handle basic tokens
 		return authHeader
 	}
-	
+
 	// Check for other token headers
 	token := r.Header.Get("X-API-Token")
 	if token != "" {
 		return token
 	}
-	
+
 	token = r.Header.Get("X-Auth-Token")
 	if token != "" {
 		return token
 	}
-	
+
 	return ""
 }
 
@@ -532,12 +583,12 @@ func calculateRiskScore(paths []*bloodhound.AttackPath) float64 {
 	if len(paths) == 0 {
 		return 0.0
 	}
-	
+
 	totalScore := 0.0
 	for _, path := range paths {
 		totalScore += path.Score
 	}
-	
+
 	return totalScore / float64(len(paths))
 }
 
@@ -546,7 +597,7 @@ func determineThreatType(paths []*bloodhound.AttackPath) string {
 	if len(paths) == 0 {
 		return "none"
 	}
-	
+
 	// For simplicity, return the threat type of the first path
 	// In a real implementation, you'd aggregate threat types
 	return paths[0].ThreatType
@@ -557,12 +608,12 @@ func calculateConfidence(paths []*bloodhound.AttackPath) float64 {
 	if len(paths) == 0 {
 		return 0.0
 	}
-	
+
 	totalConfidence := 0.0
 	for _, path := range paths {
 		totalConfidence += path.Confidence
 	}
-	
+
 	return totalConfidence / float64(len(paths))
 }
 
@@ -571,14 +622,14 @@ func calculateAttackPathScore(paths []*bloodhound.AttackPath) float64 {
 	if len(paths) == 0 {
 		return 0.0
 	}
-	
+
 	maxScore := 0.0
 	for _, path := range paths {
 		if path.Score > maxScore {
 			maxScore = path.Score
 		}
 	}
-	
+
 	return maxScore
 }
 
@@ -589,7 +640,7 @@ func routeToBackend(w http.ResponseWriter, r *http.Request) {
 	if backendHost == "" {
 		backendHost = "localhost:8081" // Default fallback
 	}
-	
+
 	// Parse the backend URL
 	backendURL := fmt.Sprintf("http://%s", backendHost)
 	target, err := url.Parse(backendURL)
@@ -598,16 +649,16 @@ func routeToBackend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Create a reverse proxy
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	
+
 	// Log the routing action
 	log.Printf("Routing request to backend: %s", backendURL)
-	
+
 	// Apply egress protection to the proxy
 	egressProtectedProxy := middleware.EgressFilter(proxy)
-	
+
 	// Serve the request through the egress-protected proxy
 	egressProtectedProxy.ServeHTTP(w, r)
 }
@@ -615,22 +666,22 @@ func routeToBackend(w http.ResponseWriter, r *http.Request) {
 // metricsHandler exposes security system metrics
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	metrics := tcellEngine.GetMetrics()
-	
+
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Create a JSON response with the metrics
 	response := map[string]interface{}{
-		"timestamp":              time.Now().Unix(),
-		"total_threats_processed": metrics.TotalThreatsProcessed,
-		"total_actions_executed":  metrics.TotalActionsExecuted,
-		"total_ip_blocks":         metrics.TotalIPBlocks,
+		"timestamp":                 time.Now().Unix(),
+		"total_threats_processed":   metrics.TotalThreatsProcessed,
+		"total_actions_executed":    metrics.TotalActionsExecuted,
+		"total_ip_blocks":           metrics.TotalIPBlocks,
 		"total_sessions_terminated": metrics.TotalSessionsTerminated,
-		"total_tokens_revoked":    metrics.TotalTokensRevoked,
-		"active_blocks":           metrics.ActiveBlocks,
-		"active_sessions":         metrics.ActiveSessions,
-		"revoked_tokens_count":    metrics.RevokedTokensCount,
+		"total_tokens_revoked":      metrics.TotalTokensRevoked,
+		"active_blocks":             metrics.ActiveBlocks,
+		"active_sessions":           metrics.ActiveSessions,
+		"revoked_tokens_count":      metrics.RevokedTokensCount,
 	}
-	
+
 	// Encode response as JSON
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Printf("Error encoding metrics: %v", err)
@@ -651,18 +702,38 @@ func logForensicEvent(eventType string, r *http.Request) {
 		r.URL.RawQuery,
 		r.UserAgent(),
 	)
-	
+
 	// Limit log entry length to prevent excessive memory usage
 	if len(logEntry) > MaxLogLength {
 		logEntry = logEntry[:MaxLogLength] + "...[TRUNCATED]"
 	}
-	
+
 	// In a real implementation, this would write to an append-only log file or database
 	// Added error handling for potential print issues
 	_, err := fmt.Println(logEntry) // For demonstration purposes
 	if err != nil {
 		log.Printf("Error writing forensic log: %v", err)
 	}
+
+	// Also append to the immutable log
+	err = immutableLogger.Append(logEntry)
+	if err != nil {
+		log.Printf("Error appending to immutable log: %v", err)
+	}
+}
+
+// Add a handler for generating POPIA breach reports
+func popiaReportHandler(w http.ResponseWriter, r *http.Request) {
+	report, err := immutableLogger.GeneratePOPIABreachReport()
+	if err != nil {
+		log.Printf("Error generating POPIA report: %v", err)
+		http.Error(w, "Failed to generate POPIA report", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, report)
 }
 
 func main() {
@@ -675,16 +746,16 @@ func main() {
 
 	// Initialize deception elements
 	log.Println("Initializing deception mesh...")
-	
+
 	// Generate some canary records for injection
 	userCanary := deceptionGen.GenerateCanaryRecord("user")
 	credCanary := deceptionGen.GenerateCanaryRecord("credential")
 	dbCanary := deceptionGen.GenerateCanaryRecord("database")
-	
+
 	log.Printf("Generated user canary: %+v", userCanary)
 	log.Printf("Generated credential canary: %+v", credCanary)
 	log.Printf("Generated database canary: %+v", dbCanary)
-	
+
 	// Print available decoy endpoints
 	decoyEndpoints := deceptionGen.GenerateDecoyEndpoints()
 	log.Printf("Configured decoy endpoints: %v", decoyEndpoints)
@@ -697,7 +768,23 @@ func main() {
 
 	// Register the metrics endpoint
 	mux.HandleFunc("/metrics", metricsHandler)
-	
+
+	// Register the POPIA report endpoint
+	mux.HandleFunc("/popia-report", popiaReportHandler)
+
+	// Register the immutable log verification endpoint
+	mux.HandleFunc("/verify-log", func(w http.ResponseWriter, r *http.Request) {
+		isValid, corrupted := immutableLogger.VerifyChain()
+		response := map[string]interface{}{
+			"valid":             isValid,
+			"corrupted_indices": corrupted,
+			"log_size":          immutableLogger.GetLogSize(),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	})
+
 	// Define a handler that implements the complete flow
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// This handler will be wrapped by all the middleware layers
@@ -744,6 +831,9 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+
+	// Log that the immutable logger is ready
+	immutableLogger.Append(fmt.Sprintf("Server starting on %s", server.Addr))
 
 	log.Println("Neutrophil Proxy Membrane Initialized.")
 	log.Printf("Server starting on %s", server.Addr)

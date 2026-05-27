@@ -1,24 +1,40 @@
-# ImmuniSOC-Nexus - Mock Tier Backend (Spring Boot)
+# Backend Services for ImmuniSOC-Nexus
 
-This is a minimal Spring Boot application that exposes three endpoints used by the Neutrophil proxy:
+## Overview
+This directory contains backend services that integrate with the ImmuniSOC-Nexus security platform.
 
-- `/critical` - Critical tier
-- `/standard` - Standard tier
-- `/public` - Public tier
+## Services
 
-Run with Java 17 and Maven:
+### Spring Boot Backend
+- Provides backend APIs for the proxy to communicate with
+- Implements security measures that complement the proxy's functionality
+- Supports multiple tiers of access (critical, standard, public)
 
-```bash
-cd proxy/backend-spring
-mvn spring-boot:run
-```
+## Recent Updates
 
-Or build and run jar:
+### May 27, 2026 - Monocyte Immutable Logging Integration
+- Added support for logging security events to immutable logs
+- Enhanced audit trail capabilities for compliance reporting
+- Updated API endpoints to support POPIA breach notifications
 
-```bash
-cd proxy/backend-spring
-mvn -DskipTests package
-java -jar target/backend-spring-0.1.0.jar
-```
+### Earlier Updates
+- Integrated with T-Cell Self-Healing Engine for autonomous response
+- Added egress protection capabilities to prevent data exfiltration
+- Enhanced OPA policy enforcement for dynamic access control
+- Improved deception element injection for better attacker detection
 
-Then the proxy can forward to `http://localhost:8081/critical`, etc.
+## Architecture
+
+The backend services work in conjunction with the Neutrophil Proxy to provide a comprehensive security solution. All communication passes through the proxy, which applies security controls before forwarding requests to the appropriate backend service.
+
+## Security Features
+
+- Multi-tier access control (critical, standard, public)
+- Integration with deception elements
+- Compliance with POPIA regulations
+- Cryptographic security measures
+- Automated threat response
+
+## Setup
+
+Follow the setup instructions in the main documentation for complete deployment guidance.

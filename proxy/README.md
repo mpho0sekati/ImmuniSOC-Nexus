@@ -1,164 +1,127 @@
-# ImmuniSOC-Nexus Proxy
-
-A comprehensive security-focused proxy system implementing advanced threat detection, authentication integrity, and regulatory compliance.
+# ImmuniSOC-Nexus: Next-Gen Zero Trust Network Security
 
 ## Overview
+ImmuniSOC-Nexus is a cutting-edge cybersecurity platform that combines advanced deception techniques, automated response mechanisms, and cryptographic logging to provide comprehensive network security with autonomous healing capabilities.
 
-The ImmuniSOC-Nexus Proxy is a multi-layered security solution designed to protect backend services through advanced authentication mechanisms, threat detection, and regulatory compliance enforcement. The system implements a defense-in-depth approach with multiple security controls working together.
+## Core Components
 
-## Architecture Components
+### 1. Neutrophil Proxy Membrane
+- **Advanced Threat Detection**: Implements multi-layered security controls including verb whitelisting, secure headers, rate limiting, and classification systems.
+- **Deception Integration**: Injects honeytokens and fake credentials to detect attackers.
+- **OPA Policy Enforcement**: Uses Open Policy Agent for dynamic access control decisions.
+- **POPIA Compliance**: Includes data protection compliance for South African privacy regulations.
+- **Egress Protection**: Implements outbound traffic filtering to prevent data exfiltration.
 
-### 1. Input Hardening & Classification (The "Brain")
+### 2. BloodHound Tracker
+- **Network Topology Mapping**: Visualizes network connections and identifies attack paths.
+- **Behavioral Analysis**: Tracks normal network behavior to detect anomalies.
+- **Honeytrap Detection**: Identifies when attackers interact with deception elements.
+- **Lateral Movement Detection**: Identifies attempts to move between systems.
 
-- **Traffic Classification Engine**: Implements sophisticated request classification using data tier validation
-- **Input Cleansing**: Uses regex patterns to reject non-alphanumeric characters in X-User contexts
-- **Data Tier Validation**: Supports three distinct security tiers:
-  - PUBLIC: Standard access level
-  - STANDARD: Elevated access level
-  - CRITICAL: Highest security access level
+### 3. Deception Generator
+- **Honeytoken Creation**: Generates fake credentials, PII, and API keys.
+- **Decoy Endpoint Generation**: Creates fake administrative endpoints.
+- **Canary Records**: Produces fake database records to detect unauthorized access.
 
-### 2. Middleware & Traffic Control (The "Membrane")
+### 4. T-Cell Self-Healing Engine
+- **Autonomous Response**: Automatically responds to threats with appropriate containment measures.
+- **Containment Levels**: Implements graduated response based on threat severity.
+- **Integration**: Works with BloodHound to respond to detected threats.
+- **Response Actions**:
+  - Enhanced logging activation
+  - Temporary IP/user blocking
+  - Session termination
+  - Token/identity revocation
+  - Security alerts
 
-- **Security Headers**: Injects essential security headers:
-  - X-Frame-Options: DENY
-  - X-Content-Type-Options: nosniff
-  - HSTS with proper max-age configuration
-- **HTTP Verb Whitelisting**: Restricts access to GET/POST methods only
-- **Thread-Safe Rate Limiting**: Token bucket algorithm with 100ms per client threshold
-- **Error Masking**: Generic status codes with no stack trace exposure
+### 5. Monocyte Immutable Logging
+- **Cryptographic Append-Only Logs**: Each log entry contains index, timestamp, data, previous hash, and current hash
+- **Tamper-Evident Structure**: Hash chaining ensures any tampering is immediately evident
+- **POPIA Breach Report Generation**: Automatic detection and reporting of privacy-related incidents
+- **Asynchronous File I/O**: Background goroutine handles file writes to avoid blocking append operations
+- **Synchronous Shutdown**: Ensures all pending writes complete before termination
 
-### 3. Authentication Integrity & Shielding
+### 6. Observability & Dashboard
+- **Real-time Metrics**: View current security metrics including active threats, blocked requests, and honeytoken hits
+- **Threat Visualization**: Interactive charts showing threat activity over time and threat type distribution
+- **Bloodhound Path Tracking**: Visual representation of attack paths detected by the Bloodhound module
+- **Containment Timeline**: Chronological view of automated containment actions taken by the T-Cell engine
+- **Threat Monitoring**: Detailed view of recent security threats with classifications and details
 
-- **SHA-256 HMAC Signatures**: Generates secure signatures for proxy-to-backend communication
-- **Shared Secret Mechanism**: HandshakeSecretToken for proxy-backend binding
-- **Cryptographic Timestamps**: 30-second validity window to prevent replay attacks
-- **Constant-Time Comparison**: Uses MessageDigest.isEqual to prevent timing analysis
-
-### 4. OPA Policy Integration (The "Consultant")
-
-- **Policy Decision Points**: Integrates with Open Policy Agent for dynamic authorization
-- **JSON Request/Response**: Proper serialization for Go-to-OPA communication
-- **Boolean Decision Logic**: Returns Allow/Deny decisions for middleware integration
-- **Low-Latency Communication**: 200ms timeout for optimal performance
-
-### 5. POPIA Regulatory Compliance
-
-- **Precise Data Processing Boundaries**: Defined in Rego policies
-- **Purpose Verification**: Supports CUSTOMER_SERVICE, IDENTITY_VERIFICATION, FRAUD_PREVENTION, LEGAL_COMPLIANCE, CONSENTED_MARKETING
-- **Default-Deny Policy**: Fail-closed security model
-- **Data Minimization**: Automated masking for non-critical segments
-- **Compliance Checking**: Validates consent, retention periods, and field access
-
-### 6. Passive Threat Deception & Countermeasures
-
-- **Canary Dataset Flags**: Tripwire strings deployed in system layers
-- **Directory Traversal Detection**: Comprehensive query string parameter checks
-- **Automated Containment**: HTTP 451 responses upon honeytoken contact
-- **Forensic Logging**: Append-only event logging format for analysis
-- **Early Threat Blocking**: Positioned before HMAC and OPA checks for efficiency
-
-### 7. System Wiring (The "Nervous System")
-
-Complete request flow:
-1. Receive Request
-2. Apply Secure Headers
-3. Detect Threats (passive threat detection)
-4. Authenticate Request (add HMAC signatures)
-5. Check Rate Limiter
-6. Classify Request (get Tier)
-7. POPIA Compliance Check
-8. Query OPA (get decision)
-9. Route to backend or Block
-
-## Technical Specifications
-
-### Server Configuration
-- **Multiplexer**: Go HTTP server with rigid, explicit path mapping
-- **Timeouts**: ReadTimeout: 5s, WriteTimeout: 10s for DoS insulation
-- **Error Handling**: Generic status codes with masked error details
-
-### Dependencies
-- Go 1.21+
-- Open Policy Agent (OPA)
-- Java Spring Boot (for backend)
-- Docker & Docker Compose
+### 7. Attack Simulation Framework
+- **Insider Attack Simulation**: Tests detection of malicious activities by legitimate users
+- **Lateral Movement Simulation**: Tests detection of attackers moving between systems
+- **Data Exfiltration Simulation**: Tests detection of data extraction attempts
+- **Honeytoken Detection Simulation**: Tests effectiveness of deception elements
+- **Normal Traffic Simulation**: Establishes baseline behavior for comparison
+- **Penetration Test Simulation**: Coordinated simulation combining all attack types
 
 ## Security Features
 
-### Authentication
-- HMAC-SHA256 signatures for proxy-backend communication
-- Timestamp validation with 30-second window
-- Constant-time signature verification
+### Advanced Deception Techniques
+- Honeytokens with unique identifiers
+- Fake PII and credentials
+- Decoy endpoints that appear legitimate
+- Canary records for database monitoring
 
-### Threat Detection
-- Directory traversal prevention
-- Canary token detection
-- Early blocking with HTTP 451 responses
-- Comprehensive logging for forensic analysis
+### Automated Response Mechanisms
+- Real-time threat detection and response
+- Graduated containment based on threat level
+- Self-healing capabilities to restore normal operations
+- Integration between detection and response systems
 
-### Compliance
-- POPIA-compliant data processing
-- Purpose verification for data access
-- Consent validation
-- Retention period enforcement
+### Cryptographic Security
+- Hash-chained immutable logs
+- Secure token generation
+- Encrypted communications
+- Cryptographic integrity verification
 
-## Deployment
+### Compliance and Privacy
+- POPIA compliance for South African privacy regulations
+- Secure handling of personal information
+- Audit trails for compliance reporting
+- Data minimization principles
 
-The system is configured for Docker-based deployment with the following services:
-- Proxy service (port 8080)
-- Backend service (port 8081)
-- OPA service (port 8181)
+## Updates Timeline
 
-### Docker Configuration
-- Isolated network (nexus-network)
-- Proper service dependencies
-- JSON-file logging driver for forensic preservation
-- Log rotation (10MB max size, 3 files)
+### May 27, 2026 - Observability & Demo Components
+- Added basic React Dashboard for real-time monitoring
+- Implemented attack simulation scripts (Insider, Lateral, Exfiltration, Honeytoken, Normal)
+- Created final pen-test simulation framework
+- Enhanced dashboard with metrics cards, charts, and timelines
 
-## Updates Log
+### May 27, 2026 - Monocyte Immutable Logging Implementation
+- Added cryptographic append-only logs with hash chaining
+- Implemented tamper-evident structure with integrity verification
+- Created POPIA breach report generation capability
+- Added asynchronous file I/O with synchronous shutdown
+- Developed comprehensive test suite for the logging system
 
-### Initial Implementation
-- Core proxy infrastructure
-- Basic middleware with security headers
-- Classification engine with tier validation
-- HTTP verb whitelisting and rate limiting
+### Earlier Updates
+- Implemented T-Cell Self-Healing Engine with autonomous response mechanisms
+- Enhanced egress protection with data sanitization and sensitive data pattern matching
+- Improved OPA policy enforcement with threat-based blocking
+- Added comprehensive test suites for core security components
+- Fixed resource leaks and improved error handling throughout the system
 
-### Authentication Integrity & Shielding
-- Implemented SHA-256 HMAC signature generation
-- Established shared secret mechanism for proxy-backend binding
-- Configured cryptographic timestamps with 30-second validity window
-- Added HMAC verification in Java Spring Boot controllers
-- Implemented constant-time comparison to prevent timing attacks
+## Architecture
 
-### POPIA Regulatory Compliance
-- Created Rego policies for precise data processing boundaries
-- Implemented purpose verification rules
-- Established default-deny (fail-closed) clauses
-- Integrated low-latency HTTP client with 200ms timeout
-- Configured OPA payload serialization
-- Implemented automated data minimization/masking logic
-- Added comprehensive tests for malformed compliance headers
+The system follows a zero-trust architecture where every request is verified and authenticated. The proxy acts as the primary security membrane, with multiple layers of controls that must be passed before requests reach backend services.
 
-### Passive Threat Deception & Countermeasures
-- Deployed canary dataset flags and tripwire strings
-- Implemented query string parameter checks for directory traversal detection
-- Built automated containment triggers (HTTP 451 return state) upon honeytoken contact
-- Configured append-only event logging format for forensic ingestion
-- Positioned threat detection early in the pipeline for performance and security
+Integration between components allows for coordinated defense: BloodHound detects threats, T-Cell responds automatically, Deception elements confuse attackers, and Monocyte maintains immutable records of all activities.
 
-### Logging & Container Configuration
-- Updated Docker configurations with proper logging drivers
-- Configured JSON-file logging for forensic preservation
-- Set up log rotation and management
-- Ensured proper positioning of threat detection in middleware chain
+## Installation and Setup
 
-## Security Considerations
+See the installation guide in the documentation folder for detailed setup instructions.
 
-- All secrets should be loaded from environment variables in production
-- Regular rotation of HandshakeSecretToken is recommended
-- Monitor forensic logs regularly for threat indicators
-- Keep OPA policies updated based on evolving security requirements
+## Contributing
+
+We welcome contributions to enhance the platform's capabilities. Please follow the contribution guidelines in the documentation.
 
 ## License
 
-This project is part of the ImmuniSOC-Nexus security platform.
+This project is licensed under the terms specified in the LICENSE file.
+
+## Support
+
+For support, please open an issue in the GitHub repository or contact the development team.

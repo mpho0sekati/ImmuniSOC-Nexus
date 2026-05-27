@@ -1,0 +1,228 @@
+.App {
+  text-align: center;
+}
+
+.app-header {
+  background-color: #282c34;
+  padding: 20px;
+  color: white;
+  margin-bottom: 20px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 2.5rem;
+}
+
+.dashboard-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* Metrics Grid */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.metric-card {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  text-align: center;
+}
+
+.metric-card h3 {
+  margin: 0 0 10px 0;
+  color: #495057;
+  font-size: 1.1rem;
+}
+
+.metric-value {
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: #0d6efd;
+  margin: 0;
+}
+
+/* Charts Section */
+.charts-section {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.chart-container {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.chart-container h2 {
+  margin-top: 0;
+  color: #495057;
+}
+
+/* Sections */
+.section {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 30px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.section h2 {
+  margin-top: 0;
+  color: #495057;
+  text-align: left;
+}
+
+/* Paths List */
+.paths-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.path-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.path-source, .path-target {
+  font-weight: bold;
+  color: #0d6efd;
+}
+
+.path-arrow {
+  color: #6c757d;
+}
+
+.path-severity {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.path-severity.critical { background: #dc3545; color: white; }
+.path-severity.high { background: #fd7e14; color: white; }
+.path-severity.medium { background: #ffc107; color: black; }
+.path-severity.low { background: #198754; color: white; }
+
+/* Timeline */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.timeline-item {
+  display: flex;
+  gap: 15px;
+  align-items: flex-start;
+}
+
+.timeline-time {
+  min-width: 100px;
+  font-weight: bold;
+  color: #6c757d;
+}
+
+.timeline-content {
+  flex: 1;
+  text-align: left;
+  background: #f8f9fa;
+  padding: 10px;
+  border-radius: 4px;
+}
+
+.timeline-details {
+  font-size: 0.9rem;
+  color: #6c757d;
+  margin-top: 5px;
+}
+
+/* Threats List */
+.threats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.threat-item {
+  text-align: left;
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 4px;
+  border-left: 4px solid #0d6efd;
+}
+
+.threat-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.threat-type {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.threat-type.bruteforce { background: #fd7e14; color: white; }
+.threat-type.sql { background: #dc3545; color: white; }
+.threat-type.xss { background: #6f42c1; color: white; }
+.threat-type.lateral { background: #e83e8c; color: white; }
+.threat-type.exfiltration { background: #20c997; color: white; }
+
+.threat-ip {
+  font-family: monospace;
+  color: #6c757d;
+}
+
+.threat-time {
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.threat-details {
+  color: #495057;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .charts-section {
+    grid-template-columns: 1fr;
+  }
+  
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .timeline-item {
+    flex-direction: column;
+    gap: 5px;
+  }
+  
+  .timeline-time {
+    min-width: auto;
+  }
+  
+  .threat-header {
+    flex-direction: column;
+    gap: 5px;
+  }
+}
