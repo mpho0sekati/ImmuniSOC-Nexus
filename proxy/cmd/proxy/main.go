@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -19,6 +20,14 @@ import (
 	"immunisoc-nexus/proxy/internal/middleware"
 	"immunisoc-nexus/proxy/internal/opa"
 	"immunisoc-nexus/proxy/internal/tcell"
+)
+
+// Constants for configuration
+const (
+	DefaultHandshakeSecret = "default-secure-dev-token" // Only for development
+	MaxLogLength          = 1000
+	MinRetentionPeriod    = 1  // days
+	MaxRetentionPeriod    = 365 // days
 )
 
 // Global instances for deception, tracking, and healing
@@ -71,7 +80,7 @@ func verbWhitelist(next http.Handler) http.Handler {
 // rateLimit middleware applies rate limiting per client IP
 func rateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr
+		ip := getClientIP(r) // Use the actual client IP, not RemoteAddr
 		limiter := getRateLimiter(ip)
 
 		if !limiter.Allow() {
@@ -596,8 +605,38 @@ func routeToBackend(w http.ResponseWriter, r *http.Request) {
 	// Log the routing action
 	log.Printf("Routing request to backend: %s", backendURL)
 	
-	// Serve the request through the proxy
-	proxy.ServeHTTP(w, r)
+	// Apply egress protection to the proxy
+	egressProtectedProxy := middleware.EgressFilter(proxy)
+	
+	// Serve the request through the egress-protected proxy
+	egressProtectedProxy.ServeHTTP(w, r)
+}
+
+// metricsHandler exposes security system metrics
+func metricsHandler(w http.ResponseWriter, r *http.Request) {
+	metrics := tcellEngine.GetMetrics()
+	
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Create a JSON response with the metrics
+	response := map[string]interface{}{
+		"timestamp":              time.Now().Unix(),
+		"total_threats_processed": metrics.TotalThreatsProcessed,
+		"total_actions_executed":  metrics.TotalActionsExecuted,
+		"total_ip_blocks":         metrics.TotalIPBlocks,
+		"total_sessions_terminated": metrics.TotalSessionsTerminated,
+		"total_tokens_revoked":    metrics.TotalTokensRevoked,
+		"active_blocks":           metrics.ActiveBlocks,
+		"active_sessions":         metrics.ActiveSessions,
+		"revoked_tokens_count":    metrics.RevokedTokensCount,
+	}
+	
+	// Encode response as JSON
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding metrics: %v", err)
+		http.Error(w, "Encoding error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // logForensicEvent logs events for forensic analysis in append-only format
@@ -607,21 +646,31 @@ func logForensicEvent(eventType string, r *http.Request) {
 		"[FORENSIC_LOG] %d | %s | %s | %s | %s | %s",
 		time.Now().UnixNano()/1000000, // timestamp in milliseconds
 		eventType,
-		r.RemoteAddr,
+		getClientIP(r), // Use the actual client IP function
 		r.URL.Path,
 		r.URL.RawQuery,
 		r.UserAgent(),
 	)
 	
+	// Limit log entry length to prevent excessive memory usage
+	if len(logEntry) > MaxLogLength {
+		logEntry = logEntry[:MaxLogLength] + "...[TRUNCATED]"
+	}
+	
 	// In a real implementation, this would write to an append-only log file or database
-	fmt.Println(logEntry) // For demonstration purposes
+	// Added error handling for potential print issues
+	_, err := fmt.Println(logEntry) // For demonstration purposes
+	if err != nil {
+		log.Printf("Error writing forensic log: %v", err)
+	}
 }
 
 func main() {
 	// Load shared secret for Proxy-to-Backend authentication
 	handshakeSecret := os.Getenv("HANDSHAKE_SECRET_TOKEN")
 	if handshakeSecret == "" {
-		handshakeSecret = "default-secure-dev-token" // Fallback for dev only
+		// According to security spec, this should be a fatal error
+		log.Fatal("ERROR: HANDSHAKE_SECRET_TOKEN environment variable is required but not set. Server startup aborted.")
 	}
 
 	// Initialize deception elements
@@ -646,6 +695,9 @@ func main() {
 	// Create a new mux router
 	mux := http.NewServeMux()
 
+	// Register the metrics endpoint
+	mux.HandleFunc("/metrics", metricsHandler)
+	
 	// Define a handler that implements the complete flow
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// This handler will be wrapped by all the middleware layers
@@ -653,23 +705,29 @@ func main() {
 	})
 
 	// Apply middleware stack in the specified order:
-	// 1. Apply Secure Headers
-	// 2. Inject Deception Elements
-	// 3. Detect Threats (passive threat detection)
-	// 4. Authenticate Request (add HMAC signatures)
-	// 5. Check Rate Limiter
-	// 6. Classify Request (get Tier)
-	// 7. POPIA Compliance Check
-	// 8. Query OPA (get decision)
-	// 9. Route to backend or Block
-	handler := middleware.ApplySecureHeaders(
-		injectDeception(
-			detectThreats(
-				authenticateRequest(handshakeSecret)(
-					rateLimit(
-						classifyRequest(
-							popiaCompliance(
-								checkOPAPolicy(mux),
+	// 1. Verb whitelist (early filtering)
+	// 2. Apply Secure Headers
+	// 3. Inject Deception Elements
+	// 4. Detect Threats (passive threat detection)
+	// 5. Authenticate Request (add HMAC signatures)
+	// 6. Check Rate Limiter
+	// 7. Classify Request (get Tier)
+	// 8. POPIA Compliance Check
+	// 9. Query OPA (get decision)
+	// 10. Egress Protection (data exfiltration prevention)
+	// 11. Route to backend or Block
+	handler := verbWhitelist(
+		middleware.ApplySecureHeaders(
+			injectDeception(
+				detectThreats(
+					authenticateRequest(handshakeSecret)(
+						rateLimit(
+							classifyRequest(
+								popiaCompliance(
+									checkOPAPolicy(
+										middleware.EgressFilter(mux), // Add egress protection before routing
+									),
+								),
 							),
 						),
 					),

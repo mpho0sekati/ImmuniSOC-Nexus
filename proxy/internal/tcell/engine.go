@@ -16,6 +16,18 @@ const (
 	Critical
 )
 
+// Metrics holds statistics about the engine's operations
+type Metrics struct {
+	TotalActionsExecuted int64
+	TotalThreatsProcessed int64
+	TotalIPBlocks        int64
+	TotalSessionsTerminated int64
+	TotalTokensRevoked   int64
+	ActiveBlocks         int64
+	ActiveSessions       int64
+	RevokedTokensCount   int64
+	mutex                sync.RWMutex
+}
 
 // Logger handles enhanced logging
 type Logger struct {
@@ -47,11 +59,12 @@ type Engine struct {
 	tokenRevoker   *TokenRevoker
 	logger         *Logger
 	mutex          sync.RWMutex
+	metrics        *Metrics
 }
 
 // NewEngine creates a new T-Cell engine instance
 func NewEngine() *Engine {
-	return &Engine{
+	engine := &Engine{
 		sessionManager: &SessionManager{
 			sessions: make(map[string]bool),
 		},
@@ -64,18 +77,29 @@ func NewEngine() *Engine {
 		logger: &Logger{
 			enabled: true,
 		},
+		metrics: &Metrics{},
 	}
+
+	// Start background cleanup for expired IP blocks
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		for range ticker.C {
+			engine.CleanupExpiredBlocks()
+		}
+	}()
+
+	return engine
 }
 
 // ResponseAction represents an automated response action
 type ResponseAction struct {
-	ActionType     string             `json:"action_type"`
-	Target         string             `json:"target"`
-	Severity       ContainmentLevel   `json:"severity"`
-	Duration       time.Duration      `json:"duration"`
-	Timestamp      time.Time          `json:"timestamp"`
-	Description    string             `json:"description"`
-	AdditionalData map[string]string  `json:"additional_data,omitempty"`
+	ActionType     string            `json:"action_type"`
+	Target         string            `json:"target"`
+	Severity       ContainmentLevel  `json:"severity"`
+	Duration       time.Duration     `json:"duration"`
+	Timestamp      time.Time         `json:"timestamp"`
+	Description    string            `json:"description"`
+	AdditionalData map[string]string `json:"additional_data,omitempty"`
 }
 
 // ExecuteResponseActions executes automated response actions based on threat assessment
@@ -105,7 +129,7 @@ func (e *Engine) ExecuteResponseActions(level ContainmentLevel, targetIP, sessio
 			Description: "Enhanced logging activated for medium-risk activity",
 		}
 		actions = append(actions, action1)
-		
+
 		action2 := ResponseAction{
 			ActionType:  "session_monitoring",
 			Target:      sessionID,
@@ -146,7 +170,9 @@ func (e *Engine) ExecuteResponseActions(level ContainmentLevel, targetIP, sessio
 			Description: "Session terminated due to high-risk activity",
 		}
 		actions = append(actions, action3)
-		e.sessionManager.TerminateSession(sessionID)
+		if sessionID != "unknown_session" && sessionID != "" {
+			e.sessionManager.TerminateSession(sessionID)
+		}
 
 	case Critical:
 		// Critical level: All actions including token revocation and extended blocking
@@ -178,7 +204,9 @@ func (e *Engine) ExecuteResponseActions(level ContainmentLevel, targetIP, sessio
 			Description: "Session terminated due to critical-risk activity",
 		}
 		actions = append(actions, action3)
-		e.sessionManager.TerminateSession(sessionID)
+		if sessionID != "unknown_session" && sessionID != "" {
+			e.sessionManager.TerminateSession(sessionID)
+		}
 
 		if token != "" {
 			action4 := ResponseAction{
@@ -200,13 +228,28 @@ func (e *Engine) ExecuteResponseActions(level ContainmentLevel, targetIP, sessio
 			Timestamp:   time.Now(),
 			Description: "Security team alerted about critical activity",
 			AdditionalData: map[string]string{
-				"threat_type":        fmt.Sprintf("%v", threatDetails["threat_type"]),
-				"attack_path_score":  fmt.Sprintf("%v", threatDetails["attack_path_score"]),
-				"confidence":         fmt.Sprintf("%v", threatDetails["confidence"]),
+				"threat_type":       fmt.Sprintf("%v", threatDetails["threat_type"]),
+				"attack_path_score": fmt.Sprintf("%v", threatDetails["attack_path_score"]),
+				"confidence":        fmt.Sprintf("%v", threatDetails["confidence"]),
 			},
 		}
 		actions = append(actions, action5)
 	}
+
+	// Update metrics
+	e.metrics.mutex.Lock()
+	e.metrics.TotalActionsExecuted += int64(len(actions))
+	for _, action := range actions {
+		switch action.ActionType {
+		case "temporary_ip_block":
+			e.metrics.TotalIPBlocks++
+		case "session_termination":
+			e.metrics.TotalSessionsTerminated++
+		case "token_revocation":
+			e.metrics.TotalTokensRevoked++
+		}
+	}
+	e.metrics.mutex.Unlock()
 
 	return actions, nil
 }
@@ -215,7 +258,7 @@ func (e *Engine) ExecuteResponseActions(level ContainmentLevel, targetIP, sessio
 func (sm *SessionManager) TerminateSession(sessionID string) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-	
+
 	delete(sm.sessions, sessionID)
 }
 
@@ -223,7 +266,7 @@ func (sm *SessionManager) TerminateSession(sessionID string) {
 func (sm *SessionManager) IsSessionActive(sessionID string) bool {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
-	
+
 	active, exists := sm.sessions[sessionID]
 	return exists && active
 }
@@ -232,7 +275,7 @@ func (sm *SessionManager) IsSessionActive(sessionID string) bool {
 func (sm *SessionManager) AddSession(sessionID string) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-	
+
 	sm.sessions[sessionID] = true
 }
 
@@ -240,7 +283,7 @@ func (sm *SessionManager) AddSession(sessionID string) {
 func (tr *TokenRevoker) RevokeToken(token string) {
 	tr.mutex.Lock()
 	defer tr.mutex.Unlock()
-	
+
 	tr.revokedTokens[token] = true
 }
 
@@ -248,7 +291,7 @@ func (tr *TokenRevoker) RevokeToken(token string) {
 func (tr *TokenRevoker) IsTokenRevoked(token string) bool {
 	tr.mutex.RLock()
 	defer tr.mutex.RUnlock()
-	
+
 	revoked, exists := tr.revokedTokens[token]
 	return exists && revoked
 }
@@ -257,7 +300,7 @@ func (tr *TokenRevoker) IsTokenRevoked(token string) bool {
 func (ib *IPBlocker) BlockIP(ip string, duration time.Duration) {
 	ib.mutex.Lock()
 	defer ib.mutex.Unlock()
-	
+
 	expiration := time.Now().Add(duration)
 	ib.blockedIPs[ip] = expiration
 }
@@ -266,19 +309,19 @@ func (ib *IPBlocker) BlockIP(ip string, duration time.Duration) {
 func (ib *IPBlocker) IsIPBlocked(ip string) bool {
 	ib.mutex.RLock()
 	defer ib.mutex.RUnlock()
-	
+
 	expiration, exists := ib.blockedIPs[ip]
 	if !exists {
 		return false
 	}
-	
+
 	// Check if block has expired
 	if time.Now().After(expiration) {
 		// Clean up expired block
 		delete(ib.blockedIPs, ip)
 		return false
 	}
-	
+
 	return true
 }
 
@@ -311,8 +354,13 @@ func (l *Logger) SetEnhancedLogging(enabled bool) {
 
 // ProcessThreat processes a threat and triggers appropriate response actions
 func (e *Engine) ProcessThreat(ip, sessionID, token string, threatLevel ContainmentLevel, threatDetails map[string]interface{}) ([]ResponseAction, error) {
+	// Update metrics
+	e.metrics.mutex.Lock()
+	e.metrics.TotalThreatsProcessed++
+	e.metrics.mutex.Unlock()
+
 	// Log the threat
-	fmt.Printf("[TCELL] Processing threat: IP=%s, Session=%s, Level=%d, Details=%v\n", 
+	fmt.Printf("[TCELL] Processing threat: IP=%s, Session=%s, Level=%d, Details=%v\n",
 		ip, sessionID, threatLevel, threatDetails)
 
 	// Execute response actions based on threat level
@@ -323,7 +371,7 @@ func (e *Engine) ProcessThreat(ip, sessionID, token string, threatLevel Containm
 
 	// Log the executed actions
 	for _, action := range actions {
-		fmt.Printf("[TCELL] Executed action: %s on %s (Severity: %d)\n", 
+		fmt.Printf("[TCELL] Executed action: %s on %s (Severity: %d)\n",
 			action.ActionType, action.Target, action.Severity)
 	}
 
@@ -339,22 +387,22 @@ func GetContainmentLevel(riskScore, confidence float64, threatType string) Conta
 	if confidence < 0 || confidence > 1 {
 		confidence = 0.5 // Default to medium confidence
 	}
-	
+
 	// High risk score and high confidence = Critical
 	if riskScore >= 8.0 && confidence >= 0.9 {
 		return Critical
 	}
-	
+
 	// Medium-high risk score = High
 	if riskScore >= 7.0 {
 		return High
 	}
-	
+
 	// Low-medium risk score = Medium
 	if riskScore >= 4.0 {
 		return Medium
 	}
-	
+
 	// Otherwise = Low
 	return Low
 }
@@ -378,20 +426,25 @@ func (e *Engine) IsSessionValid(sessionID string) bool {
 func (e *Engine) CleanupExpiredBlocks() {
 	e.ipBlocker.mutex.Lock()
 	defer e.ipBlocker.mutex.Unlock()
-	
+
 	now := time.Now()
 	for ip, expiration := range e.ipBlocker.blockedIPs {
 		if now.After(expiration) {
 			delete(e.ipBlocker.blockedIPs, ip)
 		}
 	}
+	
+	// Update metrics
+	e.metrics.mutex.Lock()
+	e.metrics.ActiveBlocks = int64(len(e.ipBlocker.blockedIPs))
+	e.metrics.mutex.Unlock()
 }
 
 // GetBlockedIPs returns a list of currently blocked IPs
 func (e *Engine) GetBlockedIPs() []string {
 	e.ipBlocker.mutex.RLock()
 	defer e.ipBlocker.mutex.RUnlock()
-	
+
 	ips := make([]string, 0, len(e.ipBlocker.blockedIPs))
 	for ip := range e.ipBlocker.blockedIPs {
 		ips = append(ips, ip)
@@ -403,7 +456,7 @@ func (e *Engine) GetBlockedIPs() []string {
 func (e *Engine) GetRevokedTokens() []string {
 	e.tokenRevoker.mutex.RLock()
 	defer e.tokenRevoker.mutex.RUnlock()
-	
+
 	tokens := make([]string, 0, len(e.tokenRevoker.revokedTokens))
 	for token := range e.tokenRevoker.revokedTokens {
 		tokens = append(tokens, token)
@@ -415,7 +468,7 @@ func (e *Engine) GetRevokedTokens() []string {
 func (e *Engine) GetActiveSessions() []string {
 	e.sessionManager.mutex.RLock()
 	defer e.sessionManager.mutex.RUnlock()
-	
+
 	sessions := make([]string, 0, len(e.sessionManager.sessions))
 	for sessionID := range e.sessionManager.sessions {
 		sessions = append(sessions, sessionID)
@@ -428,18 +481,44 @@ func (e *Engine) GetStats() map[string]int {
 	e.ipBlocker.mutex.RLock()
 	blockedIPs := len(e.ipBlocker.blockedIPs)
 	e.ipBlocker.mutex.RUnlock()
-	
+
 	e.sessionManager.mutex.RLock()
 	activeSessions := len(e.sessionManager.sessions)
 	e.sessionManager.mutex.RUnlock()
-	
+
 	e.tokenRevoker.mutex.RLock()
 	revokedTokens := len(e.tokenRevoker.revokedTokens)
 	e.tokenRevoker.mutex.RUnlock()
-	
+
 	return map[string]int{
 		"blocked_ips":     blockedIPs,
 		"active_sessions": activeSessions,
 		"revoked_tokens":  revokedTokens,
 	}
+}
+
+// GetMetrics returns detailed metrics about the engine's operations
+func (e *Engine) GetMetrics() *Metrics {
+	e.metrics.mutex.RLock()
+	defer e.metrics.mutex.RUnlock()
+
+	// Update active counts
+	stats := e.GetStats()
+	e.metrics.ActiveBlocks = int64(stats["blocked_ips"])
+	e.metrics.ActiveSessions = int64(stats["active_sessions"])
+	e.metrics.RevokedTokensCount = int64(stats["revoked_tokens"])
+
+	// Create a copy of metrics to return
+	metricsCopy := &Metrics{
+		TotalActionsExecuted: e.metrics.TotalActionsExecuted,
+		TotalThreatsProcessed: e.metrics.TotalThreatsProcessed,
+		TotalIPBlocks:        e.metrics.TotalIPBlocks,
+		TotalSessionsTerminated: e.metrics.TotalSessionsTerminated,
+		TotalTokensRevoked:   e.metrics.TotalTokensRevoked,
+		ActiveBlocks:         e.metrics.ActiveBlocks,
+		ActiveSessions:       e.metrics.ActiveSessions,
+		RevokedTokensCount:   e.metrics.RevokedTokensCount,
+	}
+
+	return metricsCopy
 }

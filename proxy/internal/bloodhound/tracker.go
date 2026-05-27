@@ -2,6 +2,7 @@ package bloodhound
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -53,6 +54,7 @@ type Tracker struct {
 	edges     []*AttackEdge
 	mutex     sync.RWMutex
 	alertChan chan *AttackPath
+	stopChan  chan struct{}  // Channel to signal shutdown
 }
 
 // NewTracker creates a new bloodhound tracker
@@ -62,6 +64,7 @@ func NewTracker() *Tracker {
 		paths:     make(map[string]*AttackPath),
 		edges:     make([]*AttackEdge, 0),
 		alertChan: make(chan *AttackPath, 100), // Buffered channel for alerts
+		stopChan:  make(chan struct{}),         // Channel to signal shutdown
 	}
 	
 	// Start alert processor goroutine
@@ -109,7 +112,12 @@ func (t *Tracker) TrackRequest(r *http.Request, isHoneytrap bool) {
 		}
 		
 		t.paths[path.ID] = path
-		t.alertChan <- path
+		select {
+		case t.alertChan <- path:
+		default:
+			// Non-blocking send in case channel is full
+			fmt.Println("[BLOODHOUND] Alert channel full, dropping alert")
+		}
 	}
 }
 
@@ -154,7 +162,13 @@ func (t *Tracker) TrackLateralMovement(fromNodeID, toNodeID, method string) {
 		attackPath.AlertLevel = "critical"
 		attackPath.Confidence = 0.95
 		attackPath.IsCompleted = true
-		t.alertChan <- attackPath
+		
+		select {
+		case t.alertChan <- attackPath:
+		default:
+			// Non-blocking send in case channel is full
+			fmt.Println("[BLOODHOUND] Alert channel full, dropping alert")
+		}
 	}
 }
 
@@ -190,10 +204,22 @@ func (t *Tracker) GetRecentAttacks(hours int) []*AttackPath {
 
 // processAlerts handles alert processing in a separate goroutine
 func (t *Tracker) processAlerts() {
-	for path := range t.alertChan {
-		// In a real implementation, this would send alerts to SIEM, etc.
-		fmt.Printf("[BLOODHOUND ALERT] Potential threat detected: %+v\n", path)
+	for {
+		select {
+		case path := <-t.alertChan:
+			// In a real implementation, this would send alerts to SIEM, etc.
+			fmt.Printf("[BLOODHOUND ALERT] Potential threat detected: %+v\n", path)
+		case <-t.stopChan:
+			// Close the alert channel and exit the goroutine
+			close(t.alertChan)
+			return
+		}
 	}
+}
+
+// Shutdown gracefully shuts down the tracker
+func (t *Tracker) Shutdown() {
+	close(t.stopChan)
 }
 
 // generateNodeID creates a unique ID for a request
@@ -214,7 +240,8 @@ func getClientIP(r *http.Request) string {
 		return realIP
 	}
 	
-	return r.RemoteAddr
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return host
 }
 
 // getSessionID extracts session ID from request (simplified)

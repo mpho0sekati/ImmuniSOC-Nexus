@@ -1,4 +1,4 @@
-package main
+package tcell_service // Changed from 'main' to prevent build conflicts
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ var quarantinesStore = struct {
 	items []QuarantineRecord
 }{}
 
-func startTCellService() {
+func StartTCellService() {  // Exported function name
 	http.HandleFunc("/quarantine", quarantinePostHandler)
 	http.HandleFunc("/quarantines", quarantinesGetHandler)
 

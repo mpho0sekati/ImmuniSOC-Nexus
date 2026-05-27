@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,6 +19,7 @@ const (
 	SignatureHeader = "X-Auth-Signature"
 	// 30 second validity window for timestamps
 	TimestampValidityWindow = 30 * time.Second
+	MaxLogLength          = 1000
 )
 
 // Threat detection patterns
@@ -63,6 +65,7 @@ func ApplyAuthentication(sharedSecret string) func(http.Handler) http.Handler {
 			// Generate HMAC signature
 			signature, err := GenerateHMACSignature(r, sharedSecret, timestamp)
 			if err != nil {
+				log.Printf("Authentication error generating signature: %v", err)
 				http.Error(w, "Authentication error", http.StatusInternalServerError)
 				return
 			}
@@ -226,6 +229,15 @@ func logForensicEvent(eventType string, r *http.Request) {
 		r.UserAgent(),
 	)
 	
+	// Limit log entry length to prevent excessive memory usage
+	if len(logEntry) > MaxLogLength {
+		logEntry = logEntry[:MaxLogLength] + "...[TRUNCATED]"
+	}
+	
 	// In a real implementation, this would write to an append-only log file or database
-	fmt.Println(logEntry) // For demonstration purposes
+	// Added error handling for potential print issues
+	_, err := fmt.Println(logEntry) // For demonstration purposes
+	if err != nil {
+		log.Printf("Error writing forensic log: %v", err)
+	}
 }
