@@ -3,6 +3,10 @@ version: '3.8'
 services:
   proxy:
     build: ..
+    environment:
+      - HANDSHAKE_SECRET_TOKEN=${HANDSHAKE_SECRET_TOKEN:?Set HANDSHAKE_SECRET_TOKEN}
+      - SECURITY_ADMIN_TOKEN=${SECURITY_ADMIN_TOKEN:?Set SECURITY_ADMIN_TOKEN}
+      - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128}
     ports:
       - "8080:8080"
     networks:
@@ -16,16 +20,19 @@ services:
         max-file: "3"
 
   opa:
-    image: openpolicyagent/opa:latest
-    ports:
-      - "8181:8181"
+    image: ${OPA_IMAGE:?Set OPA_IMAGE to a pinned OPA image tag or digest}
+    expose:
+      - "8181"
     networks:
       - nexus-network
+    volumes:
+      - ../policies:/policies:ro
     command:
       - "run"
       - "--server"
       - "--addr=:8181"
       - "--diagnostic-addr=:8182"
+      - "/policies"
     logging:
       driver: json-file
       options:

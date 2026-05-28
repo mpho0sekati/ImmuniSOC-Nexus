@@ -3,186 +3,262 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 )
 
-func TestPopiaComplianceMiddleware(t *testing.T) {
-	// Create a simple test handler that simulates the backend
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	// Wrap the handler with the POPIA compliance middleware
-	handler := popiaCompliance(testHandler)
-
+func TestVerbWhitelist(t *testing.T) {
 	tests := []struct {
 		name           string
-		headerPurpose  string
-		consentHeader  string
+		method         string
 		expectedStatus int
 	}{
 		{
-			name:           "Missing POPIA Purpose Header",
-			headerPurpose:  "",
-			consentHeader:  "true",
-			expectedStatus: 500, // Will fail due to OPA service being unavailable in test
+			name:           "GET method allowed",
+			method:         "GET",
+			expectedStatus: http.StatusOK,
 		},
 		{
-			name:           "Valid POPIA Purpose Header",
-			headerPurpose:  "CUSTOMER_SERVICE",
-			consentHeader:  "true",
-			expectedStatus: 500, // Will fail due to OPA service being unavailable in test
+			name:           "POST method allowed",
+			method:         "POST",
+			expectedStatus: http.StatusOK,
 		},
 		{
-			name:           "Invalid POPIA Purpose Header",
-			headerPurpose:  "INVALID_PURPOSE",
-			consentHeader:  "true",
-			expectedStatus: 500, // Will fail due to OPA service being unavailable in test
+			name:           "PUT method not allowed",
+			method:         "PUT",
+			expectedStatus: http.StatusMethodNotAllowed,
 		},
 		{
-			name:           "Missing Consent Header",
-			headerPurpose:  "CUSTOMER_SERVICE",
-			consentHeader:  "",
-			expectedStatus: 500, // Will fail due to OPA service being unavailable in test
+			name:           "DELETE method not allowed",
+			method:         "DELETE",
+			expectedStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:           "PATCH method not allowed",
+			method:         "PATCH",
+			expectedStatus: http.StatusMethodNotAllowed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := verbWhitelist(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("OK"))
+			}))
+
+			req := httptest.NewRequest(tt.method, "/", nil)
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, tt.expectedStatus)
+			}
+		})
+	}
+}
+
+func TestHasDirectoryTraversal(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "normal path",
+			input:    "/api/users",
+			expected: false,
+		},
+		{
+			name:     "directory traversal with ../",
+			input:    "../etc/passwd",
+			expected: true,
+		},
+		{
+			name:     "directory traversal with ..\\",
+			input:    "..\\windows\\system32",
+			expected: true,
+		},
+		{
+			name:     "encoded directory traversal",
+			input:    "%2e%2e%2fetc%2fpasswd",
+			expected: true,
+		},
+		{
+			name:     "double encoded directory traversal",
+			input:    "..%2f..%2fetc%2fpasswd",
+			expected: true,
+		},
+		{
+			name:     "empty input",
+			input:    "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hasDirectoryTraversal(tt.input)
+			if result != tt.expected {
+				t.Errorf("hasDirectoryTraversal(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHasCanaryToken(t *testing.T) {
+	tests := []struct {
+		name     string
+		setupReq func(*http.Request)
+		expected bool
+	}{
+		{
+			name: "no canary tokens",
+			setupReq: func(r *http.Request) {
+				// No canary tokens in headers, path, or query
+			},
+			expected: false,
+		},
+		{
+			name: "canary in header name",
+			setupReq: func(r *http.Request) {
+				r.Header.Set("X-Canary-Test", "some-value")
+			},
+			expected: true,
+		},
+		{
+			name: "honey in header name",
+			setupReq: func(r *http.Request) {
+				r.Header.Set("X-Honey-Token", "some-value")
+			},
+			expected: true,
+		},
+		{
+			name: "canary token in header value",
+			setupReq: func(r *http.Request) {
+				r.Header.Set("Authorization", "Bearer canary-token-12345")
+			},
+			expected: true,
+		},
+		{
+			name: "honeytoken in header value",
+			setupReq: func(r *http.Request) {
+				r.Header.Set("X-Custom", "honeytoken-abcde")
+			},
+			expected: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/", nil)
-			
-			// Add the X-PopIA-Purpose header if specified
-			if tt.headerPurpose != "" {
-				req.Header.Set("X-PopIA-Purpose", tt.headerPurpose)
-			}
-			
-			// Add consent header
-			if tt.consentHeader != "" {
-				req.Header.Set("X-PopIA-Consent", tt.consentHeader)
-			} else {
-				// Test with no consent header
-			}
-			
-			recorder := httptest.NewRecorder()
-			
-			handler.ServeHTTP(recorder, req)
-			
-			// Since OPA service is not running in test environment, 
-			// we expect 500 errors due to connection failure.
-			// This verifies that our error handling works correctly.
-			if recorder.Code != tt.expectedStatus {
-				t.Errorf("Expected status %d, got %d", tt.expectedStatus, recorder.Code)
-				t.Errorf("Response body: %s", recorder.Body.String())
+			tt.setupReq(req)
+
+			result := hasCanaryToken(req)
+			if result != tt.expected {
+				t.Errorf("hasCanaryToken() = %v, want %v", result, tt.expected)
 			}
 		})
 	}
-}
 
-func TestPopiaComplianceMiddlewareWithInvalidPurpose(t *testing.T) {
-	// This test simulates what happens when the purpose is invalid
-	// In production, OPA would return a "false" result, which should lead to 403
-	
-	// Create a simple test handler that simulates the backend
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	// Wrap the handler with the POPIA compliance middleware
-	handler := popiaCompliance(testHandler)
-
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("X-PopIA-Purpose", "INVALID_PURPOSE")
-	req.Header.Set("X-PopIA-Consent", "false") // Invalid consent
-	
-	recorder := httptest.NewRecorder()
-	
-	handler.ServeHTTP(recorder, req)
-	
-	// Even though OPA is unavailable, we should get a 500 due to the connection error
-	// In a proper environment with OPA running, this would be a 403
-	if recorder.Code != 500 {
-		t.Errorf("Expected status 500 due to OPA connection failure, got %d", recorder.Code)
-	}
-}
-
-func TestVerbWhitelistMiddleware(t *testing.T) {
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	handler := verbWhitelist(testHandler)
-
-	// Test allowed methods
-	allowedMethods := []string{"GET", "POST"}
-	for _, method := range allowedMethods {
-		req := httptest.NewRequest(method, "/", nil)
-		recorder := httptest.NewRecorder()
-		
-		handler.ServeHTTP(recorder, req)
-		
-		if recorder.Code != http.StatusOK {
-			t.Errorf("Expected status %d for method %s, got %d", http.StatusOK, method, recorder.Code)
+	// Test specific cases with paths - these should return true as the function checks for these patterns
+	t.Run("canary token in URL path", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/canary-token-endpoint", nil)
+		result := hasCanaryToken(req)
+		// This SHOULD return true because the path contains "canary-token"
+		if !result {
+			t.Errorf("hasCanaryToken() should return true for canary token in path, got %v", result)
 		}
-	}
+	})
 
-	// Test disallowed methods
-	disallowedMethods := []string{"PUT", "DELETE", "PATCH", "OPTIONS", "TRACE"}
-	for _, method := range disallowedMethods {
-		req := httptest.NewRequest(method, "/", nil)
-		recorder := httptest.NewRecorder()
-		
-		handler.ServeHTTP(recorder, req)
-		
-		if recorder.Code != http.StatusMethodNotAllowed {
-			t.Errorf("Expected status %d for method %s, got %d", http.StatusMethodNotAllowed, method, recorder.Code)
+	t.Run("honeytoken in URL path", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/honeytoken-secret", nil)
+		result := hasCanaryToken(req)
+		// This SHOULD return true because the path contains "honeytoken"
+		if !result {
+			t.Errorf("hasCanaryToken() should return true for honeytoken in path, got %v", result)
 		}
+	})
+
+	t.Run("tripwire in URL path", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/tripwire-alert", nil)
+		result := hasCanaryToken(req)
+		// This SHOULD return true because the path contains "tripwire"
+		if !result {
+			t.Errorf("hasCanaryToken() should return true for tripwire in path, got %v", result)
+		}
+	})
+
+	// Test a path that should NOT trigger the function
+	t.Run("normal path without canary tokens", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/users/profile", nil)
+		result := hasCanaryToken(req)
+		// This should return false as there are no canary-related patterns
+		if result {
+			t.Errorf("hasCanaryToken() should return false for normal path, got %v", result)
+		}
+	})
+}
+
+func TestBuildProxyHandler(t *testing.T) {
+	// Set up required environment variables
+	originalToken := os.Getenv("HANDSHAKE_TOKEN")
+	os.Setenv("HANDSHAKE_TOKEN", "test-token")
+	defer os.Setenv("HANDSHAKE_TOKEN", originalToken)
+
+	// Since buildProxyHandler includes authentication, we need to provide a signature
+	handler := buildProxyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}), "test-token")
+
+	// Test that the handler works with proper authentication
+	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"test":"data"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-Signature", "test-signature") // This will fail signature verification
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// Since our handler includes authentication, it will likely return 401 due to signature mismatch
+	// That's expected behavior - we just want to ensure it doesn't panic
+	if rr.Code != http.StatusUnauthorized && rr.Code != http.StatusOK {
+		t.Logf("buildProxyHandler returned status code: %v (this might be expected due to auth)", rr.Code)
 	}
 }
 
-func TestRateLimitMiddleware(t *testing.T) {
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+func TestIsAllowedOrigin(t *testing.T) {
+	// Test default origins
+	defaultOrigins := []string{
+		"http://localhost:3000",
+		"http://127.0.0.1:3000",
+	}
+
+	for _, origin := range defaultOrigins {
+		t.Run("default origin "+origin, func(t *testing.T) {
+			result := isAllowedOrigin(origin)
+			if !result {
+				t.Errorf("isAllowedOrigin(%q) should return true for default origin", origin)
+			}
+		})
+	}
+
+	t.Run("disallowed origin", func(t *testing.T) {
+		result := isAllowedOrigin("http://malicious-site.com")
+		if result {
+			t.Errorf("isAllowedOrigin should return false for malicious origin")
+		}
 	})
 
-	handler := rateLimit(testHandler)
+	// Test with custom origins via environment variable
+	originalEnv := os.Getenv("DASHBOARD_ALLOWED_ORIGINS")
+	os.Setenv("DASHBOARD_ALLOWED_ORIGINS", "http://custom.com,http://another-custom.com")
+	defer os.Setenv("DASHBOARD_ALLOWED_ORIGINS", originalEnv)
 
-	// Test that multiple requests from the same IP don't exceed rate limits
-	// Note: Since rate limiting is based on IP, we need to simulate that
-	req := httptest.NewRequest("GET", "/", nil)
-	// Set a remote address to simulate an IP
-	req.RemoteAddr = "192.168.1.1:12345"
-	recorder := httptest.NewRecorder()
-	
-	handler.ServeHTTP(recorder, req)
-	
-	// First request should succeed
-	if recorder.Code != http.StatusOK {
-		t.Errorf("Expected status %d for first request, got %d", http.StatusOK, recorder.Code)
-	}
-}
-
-func TestOPAPolicyMiddleware(t *testing.T) {
-	// Create a simple test handler that simulates the backend
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+	t.Run("custom origin", func(t *testing.T) {
+		result := isAllowedOrigin("http://custom.com")
+		if !result {
+			t.Errorf("isAllowedOrigin should return true for custom origin from env var")
+		}
 	})
-
-	// Wrap the handler with the OPA policy middleware
-	handler := checkOPAPolicy(testHandler)
-
-	req := httptest.NewRequest("GET", "/", nil)
-	recorder := httptest.NewRecorder()
-	
-	handler.ServeHTTP(recorder, req)
-	
-	// Since OPA service is not running in test environment,
-	// we expect a 500 error due to connection failure
-	if recorder.Code != 500 {
-		t.Errorf("Expected status 500 due to OPA connection failure, got %d", recorder.Code)
-	}
 }

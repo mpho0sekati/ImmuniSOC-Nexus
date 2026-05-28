@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -244,19 +245,66 @@ func getClientIP(r *http.Request) string {
 	return host
 }
 
-// getSessionID extracts session ID from request (simplified)
+// getSessionID extracts session ID from request with validation
 func getSessionID(r *http.Request) string {
 	sessionCookie, err := r.Cookie("session_id")
 	if err == nil && sessionCookie != nil {
-		return sessionCookie.Value
+		// Validate session ID format (should be a proper UUID or long random string)
+		if isValidSessionID(sessionCookie.Value) {
+			return sessionCookie.Value
+		}
 	}
 	
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {
-		return authHeader // Simplified - in reality you'd parse JWT or similar
+		// If it's a Bearer token, extract the token part
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+			if isValidSessionID(token) {
+				return token
+			}
+		} else {
+			// For other auth schemes, validate as well
+			if isValidSessionID(authHeader) {
+				return authHeader
+			}
+		}
 	}
 	
 	return "unknown_session"
+}
+
+// isValidSessionID validates that a session ID meets security requirements
+func isValidSessionID(id string) bool {
+	if id == "" || len(id) < 16 {
+		return false
+	}
+	
+	// Check if it looks like a UUID
+	uuidRegex := regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	if uuidRegex.MatchString(id) {
+		return true
+	}
+	
+	// Check if it's a long, random-looking string with good entropy
+	// For non-UUID session IDs, check for sufficient randomness
+	return hasSufficientEntropy(id)
+}
+
+// hasSufficientEntropy checks if a string has enough randomness to be a secure session ID
+func hasSufficientEntropy(s string) bool {
+	if len(s) < 22 { // Minimum recommended length for session tokens
+		return false
+	}
+	
+	// Count character diversity
+	charSet := make(map[rune]bool)
+	for _, r := range s {
+		charSet[r] = true
+	}
+	
+	// Require at least 50% character diversity
+	return float64(len(charSet))/float64(len(s)) >= 0.5
 }
 
 // GetNodes returns all tracked nodes
@@ -286,4 +334,21 @@ func (t *Tracker) GetHighRiskPaths() []*AttackPath {
 	}
 	
 	return highRiskPaths
+}
+
+// GetHoneytokenTriggerCount returns the count of honeytoken triggers
+func (bt *Tracker) GetHoneytokenTriggerCount() int64 {
+	bt.mutex.RLock()
+	defer bt.mutex.RUnlock()
+
+	// Count the number of honeytrap hits in the paths
+	count := int64(0)
+	for _, path := range bt.paths {
+		for _, edge := range path.Edges {
+			if edge.Alert {
+				count++
+			}
+		}
+	}
+	return count
 }

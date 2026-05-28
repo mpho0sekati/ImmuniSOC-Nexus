@@ -21,7 +21,7 @@ import java.util.List;
 @RequestMapping("/api")
 public class AuthVerificationController {
 
-    @Value("${auth.handshake.secret:default-secret}")
+    @Value("${auth.handshake.secret}")
     private String handshakeSecret;
 
     private static final long TIMESTAMP_VALIDITY_WINDOW_SECONDS = 30;
@@ -144,7 +144,10 @@ public class AuthVerificationController {
         // Recreate the message that was signed
         String method = request.getMethod();
         String path = request.getRequestURI();
-        String host = request.getServerName();
+        String host = request.getHeader("Host");
+        if (host == null || host.isEmpty()) {
+            host = request.getServerName();
+        }
 
         String message = method + "|" + path + "|" + timestamp + "|" + host;
 

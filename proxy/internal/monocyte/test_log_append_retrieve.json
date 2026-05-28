@@ -1,10 +1,1 @@
-[
-  {
-    "index": 0,
-    "timestamp": "2026-05-27T13:06:54.0032231Z",
-    "data": "Test log entry",
-    "prev_hash": "",
-    "hash": "8460bffe750c94b2cea57e68ecf7511cea5a40e2aeeabb4d16e08dcd9a149c91",
-    "signature": "e0e778e60a582b661155c4baae82e5599a431a54d6022d8ad32492c131d8cb71"
-  }
-]
+{"index":0,"timestamp":"2026-05-28T14:22:05.510109Z","data":"Test log entry","prev_hash":"","hash":"e85150060475594ffde5b73c4ba559c25df34ecca8ad544a6eafe0e1d5d10d06","signature":"f963c74aec4612a040bd87b32ca26a8379694503438ac09433a01314671f7d93"}

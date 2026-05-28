@@ -440,16 +440,46 @@ func (e *Engine) IsSessionValid(sessionID string) bool {
 	return e.sessionManager.IsSessionActive(sessionID)
 }
 
+// GetBlockedIPCount returns the count of currently blocked IP addresses
+func (e *Engine) GetBlockedIPCount() int64 {
+	e.ipBlocker.mutex.RLock()
+	defer e.ipBlocker.mutex.RUnlock()
+
+	count := int64(0)
+	now := time.Now()
+
+	for _, expiration := range e.ipBlocker.blockedIPs {
+		if now.Before(expiration) {
+			// IP is still blocked
+			count++
+		}
+		// Note: we don't clean up expired blocks here to avoid holding the lock too long
+		// Cleanup happens in the background routine
+	}
+
+	return count
+}
+
 // CleanupExpiredBlocks removes expired IP blocks
 func (e *Engine) CleanupExpiredBlocks() {
 	e.ipBlocker.mutex.Lock()
 	defer e.ipBlocker.mutex.Unlock()
 
 	now := time.Now()
+	
+	// Create a slice of IPs to remove to avoid modifying the map while iterating
+	var expiredIPs []string
+	
+	// Identify expired blocks
 	for ip, expiration := range e.ipBlocker.blockedIPs {
 		if now.After(expiration) {
-			delete(e.ipBlocker.blockedIPs, ip)
+			expiredIPs = append(expiredIPs, ip)
 		}
+	}
+	
+	// Remove expired blocks
+	for _, ip := range expiredIPs {
+		delete(e.ipBlocker.blockedIPs, ip)
 	}
 
 	// Update metrics

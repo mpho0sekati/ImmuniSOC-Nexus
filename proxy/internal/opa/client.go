@@ -24,9 +24,12 @@ type PolicyResponse struct {
 
 // OpaClient handles communication with the OPA service
 type OpaClient struct {
-	client   *http.Client
-	baseURL  string
-	blockURL string
+	client    *http.Client
+	baseURL   string
+	egressURL string
+	popiaURL  string
+	blockURL  string
+	intelURL  string
 }
 
 // NewOpaClient creates a new OPA client with low-latency settings
@@ -37,9 +40,12 @@ func NewOpaClient() *OpaClient {
 	}
 
 	return &OpaClient{
-		client:   httpClient,
-		baseURL:  envOrDefault("OPA_POLICY_URL", "http://opa:8181/v1/data/authz/allow"),
-		blockURL: envOrDefault("OPA_BLOCK_POLICY_URL", "http://opa:8181/v1/data/authz/block_egress"),
+		client:    httpClient,
+		baseURL:   envOrDefault("OPA_POLICY_URL", "http://opa:8181/v1/data/authz/allow"),
+		egressURL: envOrDefault("OPA_EGRESS_POLICY_URL", "http://opa:8181/v1/data/egress/allow"),
+		popiaURL:  envOrDefault("OPA_POPIA_POLICY_URL", "http://opa:8181/v1/data/popia/allow"),
+		blockURL:  envOrDefault("OPA_BLOCK_POLICY_URL", "http://opa:8181/v1/data/egress/block_egress"),
+		intelURL:  envOrDefault("OPA_INTEL_POLICY_URL", "http://opa:8181/v1/data/intel/reputation"),
 	}
 }
 
@@ -56,6 +62,26 @@ var defaultClient = NewOpaClient()
 
 // CheckPolicy sends a request to the OPA container to evaluate a policy
 func (c *OpaClient) CheckPolicy(input map[string]interface{}) (bool, error) {
+	return c.checkPolicyAt(c.baseURL, input)
+}
+
+func (c *OpaClient) CheckEgressPolicy(input map[string]interface{}) (bool, error) {
+	return c.checkPolicyAt(c.egressURL, input)
+}
+
+func (c *OpaClient) CheckPopiaPolicy(input map[string]interface{}) (bool, error) {
+	return c.checkPolicyAt(c.popiaURL, input)
+}
+
+func (c *OpaClient) CheckBlockPolicy(input map[string]interface{}) (bool, error) {
+	return c.checkPolicyAt(c.blockURL, input)
+}
+
+func (c *OpaClient) CheckThreatIntel(input map[string]interface{}) (bool, error) {
+	return c.checkPolicyAt(c.intelURL, input)
+}
+
+func (c *OpaClient) checkPolicyAt(policyURL string, input map[string]interface{}) (bool, error) {
 	// Prepare the request payload
 	requestBody := struct {
 		Input map[string]interface{} `json:"input"`
@@ -72,7 +98,7 @@ func (c *OpaClient) CheckPolicy(input map[string]interface{}) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Millisecond)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", policyURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return false, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -124,7 +150,7 @@ func CheckEgressPolicy(destination string, payload string, purpose string) (bool
 		"audit_log_required":  true,
 	}
 
-	return defaultClient.CheckPolicy(input)
+	return defaultClient.CheckEgressPolicy(input)
 }
 
 // CheckEgressBlockPolicy checks if egress should be blocked
@@ -136,53 +162,7 @@ func CheckEgressBlockPolicy(destination string, payload string, purpose string) 
 		"data_classification": classifyEgressData(payload),
 	}
 
-	// Try to check the block_egress policy specifically
-	// This assumes there's a specific endpoint for block policies
-	requestBody := struct {
-		Input map[string]interface{} `json:"input"`
-	}{
-		Input: input,
-	}
-
-	jsonData, err := json.Marshal(requestBody)
-	if err != nil {
-		return false, fmt.Errorf("failed to marshal block request body: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Millisecond)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "POST", defaultClient.blockURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return false, fmt.Errorf("failed to create block request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := defaultClient.client.Do(req)
-	if err != nil {
-		// If the specific block endpoint doesn't exist, fall back to general policy
-		// This could happen if the policy isn't loaded yet
-		return false, nil
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("failed to read block response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		// If the specific block endpoint doesn't exist, fall back to general policy
-		return false, nil
-	}
-
-	var policyResp PolicyResponse
-	err = json.Unmarshal(body, &policyResp)
-	if err != nil {
-		return false, fmt.Errorf("failed to unmarshal block response: %w", err)
-	}
-
-	return policyResp.Result, nil
+	return defaultClient.CheckBlockPolicy(input)
 }
 
 // classifyEgressData classifies data for egress policies
@@ -260,5 +240,5 @@ func CheckPopiaCompliance(purpose string, accessedFields []string, consentGiven 
 		"retention_period": retentionPeriod,
 	}
 
-	return defaultClient.CheckPolicy(input)
+	return defaultClient.CheckPopiaPolicy(input)
 }

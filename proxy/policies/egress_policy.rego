@@ -1,4 +1,4 @@
-package authz
+package egress
 
 import rego.v1
 
@@ -30,7 +30,7 @@ sensitive_patterns = [
 ]
 
 # Function to check if data contains sensitive information
-contains_sensitive_data(data) := true {
+contains_sensitive_data(data) := true if {
     some i
     re_match(sensitive_patterns[i], data)
 }
@@ -57,14 +57,14 @@ allow if {
 }
 
 # Function to check if payload contains sensitive data
-contains_sensitive_payload(payload) := true {
+contains_sensitive_payload(payload) := true if {
     # Convert payload to string for pattern matching
     payload_str = sprintf("%v", [payload])
     contains_sensitive_data(payload_str)
 }
 
 # Function to check if destination is approved
-is_approved_destination(destination) := true {
+is_approved_destination(destination) := true if {
     # List of approved destinations
     approved_destinations = [
         "https://analytics.company.com",
@@ -77,7 +77,7 @@ is_approved_destination(destination) := true {
 }
 
 # Function to check if request has valid business purpose
-has_valid_business_purpose(purpose) := true {
+has_valid_business_purpose(purpose) := true if {
     valid_purposes = [
         "customer_support",
         "system_monitoring", 
@@ -111,7 +111,7 @@ block_egress if {
 }
 
 # Function to check if destination is suspicious
-is_suspicious_destination(destination) := true {
+is_suspicious_destination(destination) := true if {
     suspicious_domains = [
         "pastebin.com",
         "dropbox.com",

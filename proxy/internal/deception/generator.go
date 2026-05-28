@@ -2,7 +2,7 @@ package deception
 
 import (
 	"crypto/rand"
-	"encoding/hex"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -32,12 +32,12 @@ func NewGenerator(prefix string) *Generator {
 
 // GenerateHoneytoken creates a new honeytoken with specified parameters
 func (g *Generator) GenerateHoneytoken(description string, expiryHours int) (*Honeytoken, error) {
-	tokenID, err := g.generateRandomString(16)
+	tokenID, err := g.generateRandomString(32) // Increased entropy
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token ID: %w", err)
 	}
 
-	value, err := g.generateRandomString(32)
+	value, err := g.generateRandomString(64) // Increased entropy
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token value: %w", err)
 	}
@@ -57,44 +57,51 @@ func (g *Generator) GenerateHoneytoken(description string, expiryHours int) (*Ho
 	return honeytoken, nil
 }
 
-// GenerateFakePII creates fake personally identifiable information for canary records
+// GenerateFakePII creates fake personally identifiable information for canary records with increased entropy
 func (g *Generator) GenerateFakePII() map[string]string {
-	fakeID, _ := g.generateRandomString(10)
-	fakeEmail, _ := g.generateRandomString(8)
+	// Generate longer, more complex fake data
+	idPart, _ := g.generateRandomString(16)
+	emailPart, _ := g.generateRandomString(12)
+	passportPart, _ := g.generateRandomString(10)
 	
 	return map[string]string{
-		"fake_ssn":        fmt.Sprintf("123-45-%s", fakeID[:4]),
-		"fake_passport":   fmt.Sprintf("P%s", strings.ToUpper(fakeID)),
-		"fake_email":      fmt.Sprintf("%s@honeypot.com", fakeEmail),
-		"fake_phone":      fmt.Sprintf("+1-555-%s", fakeID[:4]),
-		"fake_address":    fmt.Sprintf("123 Fake St, Honeyville, HV %s", fakeID[:5]),
-		"fake_employeeid": fmt.Sprintf("%s-FK", strings.ToUpper(fakeID[:6])),
+		"fake_ssn":        fmt.Sprintf("%s-%s-%s", idPart[:3], idPart[4:6], idPart[6:10]),
+		"fake_passport":   fmt.Sprintf("P%s%s", strings.ToUpper(passportPart[:4]), strings.ToUpper(passportPart[4:8])),
+		"fake_email":      fmt.Sprintf("%s.%s@%s.honeypot.net", emailPart[:6], emailPart[6:], strings.ToLower(idPart[:8])),
+		"fake_phone":      fmt.Sprintf("+%s-%s-%s", idPart[:3], idPart[3:6], idPart[6:10]),
+		"fake_address":    fmt.Sprintf("%s Fake St, %s Ville, HV %s", idPart[:5], idPart[5:10], idPart[10:15]),
+		"fake_employeeid": fmt.Sprintf("%s-%s", strings.ToUpper(idPart[:8]), strings.ToUpper(idPart[8:12])),
 	}
 }
 
-// GenerateFakeCredentials creates fake credentials for canary records
+// GenerateFakeCredentials creates fake credentials for canary records with increased entropy
 func (g *Generator) GenerateFakeCredentials() map[string]string {
-	username, _ := g.generateRandomString(8)
-	password, _ := g.generateRandomString(12)
-	apiKey, _ := g.generateRandomString(32)
+	username, _ := g.generateRandomString(16)  // Longer username
+	password, _ := g.generateRandomString(32)  // Much longer password
+	apiKey, _ := g.generateRandomString(48)    // Very long API key
 	
 	return map[string]string{
-		"fake_username": fmt.Sprintf("honey_%s", username),
-		"fake_password": fmt.Sprintf("Honey_%s!2023", password),
-		"fake_api_key":  fmt.Sprintf("hk_%s_%s", apiKey[:8], apiKey[24:]),
-		"fake_token":    fmt.Sprintf("ht_%s", apiKey),
-		"fake_secret":   fmt.Sprintf("hs_%s", password),
+		"fake_username": fmt.Sprintf("honey_%s_%s", username[:8], username[8:16]),
+		"fake_password": fmt.Sprintf("H0n3y_%s_%s!2026", password[:16], password[16:32]),
+		"fake_api_key":  fmt.Sprintf("ak_honey_%s_%s_%s", apiKey[:16], apiKey[16:32], apiKey[32:48]),
+		"fake_token":    fmt.Sprintf("ht_%s_%s", apiKey[:24], apiKey[24:48]),
+		"fake_secret":   fmt.Sprintf("hs_%s_%s", password[:20], password[20:32]),
 	}
 }
 
-// generateRandomString generates a random hex string of specified length
+// generateRandomString generates a cryptographically secure random string of specified length
 func (g *Generator) generateRandomString(length int) (string, error) {
-	bytes := make([]byte, length)
+	// Use a larger byte array to ensure sufficient entropy
+	bytes := make([]byte, length*2) // Generate more bytes than needed
 	_, err := rand.Read(bytes)
 	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(bytes)[:length], nil
+	
+	// Use base64 encoding for better character distribution instead of hex
+	encoded := base64.URLEncoding.EncodeToString(bytes)
+	// Truncate to desired length, ensuring we have good entropy
+	return encoded[:length], nil
 }
 
 // ValidateToken checks if a token is valid and not expired

@@ -1,21 +1,27 @@
 package authz
 
-# Deny if the risk score from Bloodhound exceeds the threshold
-allow = false {
-    input.risk_score > 7.0
+import rego.v1
+
+default allow = false
+
+allowed_methods := {"GET", "POST"}
+blocked_threats := {"honeytrap_access", "directory_traversal", "decoy_endpoint_access"}
+
+allow if {
+	input.method in allowed_methods
+	not high_risk_request
 }
 
-# Deny if a specific honeytrap access is detected
-allow = false {
-    input.threat_type == "honeytrap_access"
+high_risk_request if {
+	input.risk_score > 7.0
 }
 
-# Deny if high-risk lateral movement is detected with high confidence
-allow = false {
-    input.threat_type == "lateral_movement"
-    input.attack_path_score > 8.0
-    input.confidence > 0.9
+high_risk_request if {
+	input.threat_type in blocked_threats
 }
 
-# Default allow for normal requests that don't match deny conditions
-default allow = true
+high_risk_request if {
+	input.threat_type == "lateral_movement"
+	input.attack_path_score > 8.0
+	input.confidence > 0.9
+}
