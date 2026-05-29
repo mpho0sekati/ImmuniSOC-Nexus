@@ -12,6 +12,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Formatter;
 
+import java.io.BufferedReader;
 import javax.servlet.http.HttpServletRequest;
 import java.util.stream.Collectors;
 import java.util.Arrays;
@@ -125,8 +126,8 @@ public class AuthVerificationController {
 
     // Helper method to get request payload (would need custom implementation)
     private String getRequestPayload(HttpServletRequest request) {
-        try {
-            return request.getReader().lines().collect(Collectors.joining(System.lineSeparator()));
+        try (BufferedReader reader = request.getReader()) {
+            return reader.lines().collect(Collectors.joining(System.lineSeparator()));
         } catch (Exception e) {
             // If we can't read the body, we return empty to avoid breaking the flow
             return "";

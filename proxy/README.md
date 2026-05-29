@@ -3,6 +3,36 @@
 ## Overview
 ImmuniSOC-Nexus is a cutting-edge cybersecurity platform that combines advanced deception techniques, automated response mechanisms, and cryptographic logging to provide comprehensive network security with autonomous healing capabilities.
 
+## Table of Contents
+- [Architecture](#architecture)
+- [Core Components](#core-components)
+- [Setup](#setup)
+- [Configuration](#configuration)
+- [Security Features](#security-features)
+- [Observability](#observability)
+- [Development](#development)
+- [Updates Timeline](#updates-timeline)
+
+## Architecture
+ImmuniSOC-Nexus follows a microservices architecture with the following layers:
+- **Proxy Layer**: Neutrophil Proxy Membrane handles incoming requests with security controls
+- **Security Services**: Individual Go services for different security functions
+- **Policy Engine**: OPA (Open Policy Agent) for centralized authorization
+- **Frontend**: React-based dashboard for monitoring and administration
+- **Database**: Persistent storage for logs, policies, and configurations
+- **Container Orchestration**: Docker Compose for local deployment
+
+### Component Interactions
+```
+[External Request] -> [Neutrophil Proxy] -> [Backend Service]
+                        |                     |
+                   [BloodHound] <- [OPA Policy Engine]
+                        |                     |
+                   [T-Cell] --------> [Monocyte Logger]
+                        |                     |
+                   [Deception] <-----> [Dashboard]
+```
+
 ## Core Components
 
 ### 1. Neutrophil Proxy Membrane
@@ -56,6 +86,78 @@ ImmuniSOC-Nexus is a cutting-edge cybersecurity platform that combines advanced 
 - **Normal Traffic Simulation**: Establishes baseline behavior for comparison
 - **Penetration Test Simulation**: Coordinated simulation combining all attack types
 
+## Setup
+
+### Prerequisites
+- Docker and Docker Compose
+- Node.js 16+ (for dashboard development)
+- Go 1.19+ (for backend development)
+- Git
+
+### Local Development Setup
+
+1. Clone the repository:
+```bash
+git clone https://github.com/mpho0sekati/ImmuniSOC-Nexus.git
+cd ImmuniSOC-Nexus/proxy
+```
+
+2. Start the services using Docker Compose:
+```bash
+docker-compose up -d
+```
+
+3. For dashboard development, install dependencies and start the development server:
+```bash
+cd dashboard
+npm install
+npm start
+```
+
+4. For backend development, build and run the Go services:
+```bash
+cd cmd/proxy
+go build -o proxy .
+./proxy
+```
+
+### Production Deployment
+Use the deployment/docker-compose.yml file for production deployments:
+```bash
+cd deployment
+docker-compose -f docker-compose.yml up -d
+```
+
+## Configuration
+
+### Environment Variables
+The system uses several environment variables for configuration:
+
+#### Proxy Configuration
+- `PROXY_PORT`: Port for the proxy service (default: 8080)
+- `BACKEND_URL`: URL of the backend service (default: http://localhost:8081)
+- `OPA_URL`: URL of the OPA service (default: http://opa:8181)
+- `LOG_FILE_PATH`: Path for log files (default: ./logs/security.log)
+
+#### Security Configuration
+- `HANDSHAKE_SECRET_TOKEN`: Secret token for internal service authentication
+- `SECURITY_ADMIN_TOKEN`: Admin token for security operations
+- `JWT_SECRET`: Secret for JWT token signing
+- `ENCRYPTION_KEY`: Key for data encryption
+
+#### Dashboard Configuration
+- `REACT_APP_API_BASE_URL`: Base URL for API calls (default: http://localhost:8080/api)
+- `REACT_APP_REFRESH_INTERVAL`: Refresh interval for dashboard data (default: 30000ms)
+- `REACT_APP_RETRY_ATTEMPTS`: Number of retry attempts for API calls (default: 3)
+- `REACT_APP_TIMEOUT_MS`: Timeout for API calls (default: 10000ms)
+
+### Centralized Configuration Management
+Configuration is managed through:
+1. Environment variables for deployment-specific settings
+2. application.properties files for Spring Boot services
+3. Docker Compose files for container orchestration
+4. Go configuration structs for service-specific settings
+
 ## Security Features
 
 ### Advanced Deception Techniques
@@ -82,6 +184,61 @@ ImmuniSOC-Nexus is a cutting-edge cybersecurity platform that combines advanced 
 - Audit trails for compliance reporting
 - Data minimization principles
 
+## Observability
+
+### Dashboard Access
+The dashboard is available at `http://localhost:3000` in development mode or the configured host in production.
+
+### Metrics Available
+- Active threats count
+- Blocked requests count
+- Honeytoken hits
+- Active sessions
+- Revoked tokens
+- Total actions executed
+
+### Logging
+- Security logs in JSON format
+- Immutable logging with cryptographic integrity
+- Structured logging for easy parsing
+- Log rotation and retention policies
+
+## Development
+
+### Running Tests
+Run the full test suite:
+```bash
+go test ./...
+```
+
+Run specific package tests:
+```bash
+go test ./internal/bloodhound
+go test ./internal/tcell
+go test ./internal/monocyte
+```
+
+### Building
+Build the proxy service:
+```bash
+cd cmd/proxy
+go build
+```
+
+Build the dashboard:
+```bash
+cd dashboard
+npm run build
+```
+
+### Contributing
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass
+6. Submit a pull request
+
 ## Updates Timeline
 
 ### May 27, 2026 - Observability & Demo Components
@@ -103,24 +260,6 @@ ImmuniSOC-Nexus is a cutting-edge cybersecurity platform that combines advanced 
 - Improved OPA policy enforcement with threat-based blocking
 - Added comprehensive test suites for core security components
 - Fixed resource leaks and improved error handling throughout the system
-
-## Architecture
-
-The system follows a zero-trust architecture where every request is verified and authenticated. The proxy acts as the primary security membrane, with multiple layers of controls that must be passed before requests reach backend services.
-
-Integration between components allows for coordinated defense: BloodHound detects threats, T-Cell responds automatically, Deception elements confuse attackers, and Monocyte maintains immutable records of all activities.
-
-## Installation and Setup
-
-See the installation guide in the documentation folder for detailed setup instructions.
-
-## Contributing
-
-We welcome contributions to enhance the platform's capabilities. Please follow the contribution guidelines in the documentation.
-
-## License
-
-This project is licensed under the terms specified in the LICENSE file.
 
 ## Support
 

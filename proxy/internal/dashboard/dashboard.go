@@ -22,46 +22,46 @@ import (
 
 // Dashboard represents the secure-by-design dashboard system
 type Dashboard struct {
-	bloodTracker     *bloodhound.Tracker
-	classifier       *classification.Classifier
-	deceptionGen     *deception.Generator
-	hardeningMgr     *hardening.HardeningManager
-	microSegManager  *microseg.MicrosegmentationManager
+	bloodTracker    *bloodhound.Tracker
+	classifier      *classification.Classifier
+	deceptionGen    *deception.Generator
+	hardeningMgr    *hardening.HardeningManager
+	microSegManager *microseg.MicrosegmentationManager
 	immutableLogger *monocyte.MonocyteLogger
 	opaClient       *opa.OpaClient
 	tcellEngine     *tcell.Engine
 	rbacManager     *rbac.RBACManager
-	mutex            sync.RWMutex
-	securityMetrics  SecurityMetrics
+	mutex           sync.RWMutex
+	securityMetrics SecurityMetrics
 }
 
 // SecurityMetrics holds comprehensive security metrics
 type SecurityMetrics struct {
-	ActiveThreats       int64     `json:"active_threats"`
-	BlockedRequests     int64     `json:"blocked_requests"`
-	HoneytokenHits      int64     `json:"honeytoken_hits"`
-	ActiveSessions      int64     `json:"active_sessions"`
-	RevokedTokens       int64     `json:"revoked_tokens"`
-	TotalActionsExecuted int64     `json:"total_actions_executed"`
-	ActiveIPBlocks      int64     `json:"active_ip_blocks"`
-	TotalThreatsProcessed int64   `json:"total_threats_processed"`
-	LogIntegrity        bool      `json:"log_integrity"`
-	LastUpdate          time.Time `json:"last_update"`
-	RiskScore           float64   `json:"risk_score"`
-	ComplianceStatus    string    `json:"compliance_status"`
-	EncryptionStatus    string    `json:"encryption_status"`
+	ActiveThreats         int64     `json:"active_threats"`
+	BlockedRequests       int64     `json:"blocked_requests"`
+	HoneytokenHits        int64     `json:"honeytoken_hits"`
+	ActiveSessions        int64     `json:"active_sessions"`
+	RevokedTokens         int64     `json:"revoked_tokens"`
+	TotalActionsExecuted  int64     `json:"total_actions_executed"`
+	ActiveIPBlocks        int64     `json:"active_ip_blocks"`
+	TotalThreatsProcessed int64     `json:"total_threats_processed"`
+	LogIntegrity          bool      `json:"log_integrity"`
+	LastUpdate            time.Time `json:"last_update"`
+	RiskScore             float64   `json:"risk_score"`
+	ComplianceStatus      string    `json:"compliance_status"`
+	EncryptionStatus      string    `json:"encryption_status"`
 }
 
 // DashboardData represents the comprehensive dashboard data structure
 type DashboardData struct {
-	Metrics       SecurityMetrics           `json:"metrics"`
-	Threats       []ThreatInfo              `json:"threats"`
-	Paths         []bloodhound.AttackPath   `json:"paths"`  // Using the correct AttackPath type
-	Timeline      []tcell.ResponseAction    `json:"timeline"`
-	SecurityStats map[string]interface{}    `json:"security_stats"`
-	Compliance    ComplianceReport          `json:"compliance"`
-	Version       string                    `json:"version"`
-	Timestamp     time.Time                 `json:"timestamp"`
+	Metrics       SecurityMetrics         `json:"metrics"`
+	Threats       []ThreatInfo            `json:"threats"`
+	Paths         []bloodhound.AttackPath `json:"paths"` // Using the correct AttackPath type
+	Timeline      []tcell.ResponseAction  `json:"timeline"`
+	SecurityStats map[string]interface{}  `json:"security_stats"`
+	Compliance    ComplianceReport        `json:"compliance"`
+	Version       string                  `json:"version"`
+	Timestamp     time.Time               `json:"timestamp"`
 }
 
 // ThreatInfo represents detailed threat information
@@ -78,13 +78,13 @@ type ThreatInfo struct {
 
 // ComplianceReport represents compliance status information
 type ComplianceReport struct {
-	POPIAStatus     string    `json:"popia_status"`
-	LastAudit       time.Time `json:"last_audit"`
-	NextAudit       time.Time `json:"next_audit"`
-	Findings        []string  `json:"findings"`
-	OverallScore    float64   `json:"overall_score"`
-	RequirementsMet int       `json:"requirements_met"`
-	TotalRequirements int     `json:"total_requirements"`
+	POPIAStatus       string    `json:"popia_status"`
+	LastAudit         time.Time `json:"last_audit"`
+	NextAudit         time.Time `json:"next_audit"`
+	Findings          []string  `json:"findings"`
+	OverallScore      float64   `json:"overall_score"`
+	RequirementsMet   int       `json:"requirements_met"`
+	TotalRequirements int       `json:"total_requirements"`
 }
 
 // NewDashboard creates a new secure dashboard instance
@@ -100,11 +100,11 @@ func NewDashboard(
 	rm *rbac.RBACManager,
 ) *Dashboard {
 	dash := &Dashboard{
-		bloodTracker:     bt,
-		classifier:       cf,
-		deceptionGen:     dg,
-		hardeningMgr:     hm,
-		microSegManager:  msm,
+		bloodTracker:    bt,
+		classifier:      cf,
+		deceptionGen:    dg,
+		hardeningMgr:    hm,
+		microSegManager: msm,
 		immutableLogger: il,
 		opaClient:       oc,
 		tcellEngine:     te,
@@ -148,32 +148,37 @@ func (d *Dashboard) updateMetrics() {
 	// Update from other components
 	d.securityMetrics.HoneytokenHits = d.bloodTracker.GetHoneytokenTriggerCount()
 	d.securityMetrics.ActiveThreats = int64(len(d.bloodTracker.GetHighRiskPaths()))
-	
+
 	// Check log integrity
 	isValid, _ := d.immutableLogger.VerifyChain()
 	d.securityMetrics.LogIntegrity = isValid
-	
+
 	// Update risk score based on various factors
 	d.securityMetrics.RiskScore = d.calculateRiskScore()
-	
+
 	d.securityMetrics.LastUpdate = time.Now()
 }
 
 // calculateRiskScore calculates an overall risk score based on security metrics
 func (d *Dashboard) calculateRiskScore() float64 {
 	score := 0.0
-	
+
 	// Weighted factors affecting risk
 	score += float64(d.securityMetrics.ActiveThreats) * 10.0
 	score += float64(d.securityMetrics.BlockedRequests) * 0.5
 	score += float64(d.securityMetrics.HoneytokenHits) * 15.0
 	score += float64(d.securityMetrics.ActiveIPBlocks) * 2.0
-	
+
+	// Drastically impact risk score if immutable logs are tampered with
+	if !d.securityMetrics.LogIntegrity {
+		score += 50.0
+	}
+
 	// Cap at 100
 	if score > 100.0 {
 		score = 100.0
 	}
-	
+
 	// Invert so lower is better
 	return 100.0 - score
 }
@@ -181,25 +186,25 @@ func (d *Dashboard) calculateRiskScore() float64 {
 // Handler returns the HTTP handler for the dashboard API
 func (d *Dashboard) Handler() http.Handler {
 	mux := http.NewServeMux()
-	
+
 	// Main dashboard data endpoint
 	mux.HandleFunc("/api/dashboard", d.handleDashboardData)
-	
+
 	// Security metrics endpoint
 	mux.HandleFunc("/api/metrics", d.handleMetrics)
-	
+
 	// Threats endpoint
 	mux.HandleFunc("/api/threats", d.handleThreats)
-	
+
 	// Compliance endpoint
 	mux.HandleFunc("/api/compliance", d.handleCompliance)
-	
+
 	// Security configuration endpoint
 	mux.HandleFunc("/api/config", d.handleConfig)
-	
+
 	// Health check
 	mux.HandleFunc("/api/health", d.handleHealth)
-	
+
 	return mux
 }
 
@@ -211,19 +216,19 @@ func (d *Dashboard) handleDashboardData(w http.ResponseWriter, r *http.Request) 
 	}
 
 	data := d.GetDashboardData()
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
-	
+
 	// Implement strict CORS policy
 	origin := r.Header.Get("Origin")
-	if origin != "" && isValidOrigin(origin) {
+	if origin != "" && IsAllowedOrigin(origin) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 	}
-	
+
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		log.Printf("Error encoding dashboard data: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -240,10 +245,10 @@ func (d *Dashboard) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	d.mutex.RLock()
 	metrics := d.securityMetrics
 	d.mutex.RUnlock()
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	
+
 	if err := json.NewEncoder(w).Encode(metrics); err != nil {
 		log.Printf("Error encoding metrics: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -258,10 +263,10 @@ func (d *Dashboard) handleThreats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	threats := d.getThreats()
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	
+
 	if err := json.NewEncoder(w).Encode(threats); err != nil {
 		log.Printf("Error encoding threats: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -276,10 +281,10 @@ func (d *Dashboard) handleCompliance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	compliance := d.getComplianceReport()
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	
+
 	if err := json.NewEncoder(w).Encode(compliance); err != nil {
 		log.Printf("Error encoding compliance: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -294,10 +299,10 @@ func (d *Dashboard) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	config := d.getConfig()
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	
+
 	if err := json.NewEncoder(w).Encode(config); err != nil {
 		log.Printf("Error encoding config: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -316,20 +321,20 @@ func (d *Dashboard) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"timestamp": time.Now().UTC(),
 		"version":   "1.0.0",
 		"components": map[string]string{
-			"bloodhound":    "operational",
-			"tcell":         "operational",
-			"monocyte":      "operational",
-			"deception":     "operational",
-			"opa":           "operational",
-			"microseg":      "operational",
-			"hardening":     "operational",
-			"rbac":          "operational",
+			"bloodhound": "operational",
+			"tcell":      "operational",
+			"monocyte":   "operational",
+			"deception":  "operational",
+			"opa":        "operational",
+			"microseg":   "operational",
+			"hardening":  "operational",
+			"rbac":       "operational",
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	
+
 	if err := json.NewEncoder(w).Encode(health); err != nil {
 		log.Printf("Error encoding health: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -350,14 +355,14 @@ func (d *Dashboard) GetDashboardData() *DashboardData {
 	}
 
 	return &DashboardData{
-		Metrics:    metrics,
-		Threats:    d.getThreats(),
-		Paths:      paths,
-		Timeline:   d.tcellEngine.GetRecentActions(),
+		Metrics:       metrics,
+		Threats:       d.getThreats(),
+		Paths:         paths,
+		Timeline:      d.tcellEngine.GetRecentActions(),
 		SecurityStats: d.getSecurityStats(),
-		Compliance: d.getComplianceReport(),
-		Version:    "1.0.0",
-		Timestamp:  time.Now(),
+		Compliance:    d.getComplianceReport(),
+		Version:       "1.0.0",
+		Timestamp:     time.Now(),
 	}
 }
 
@@ -365,13 +370,13 @@ func (d *Dashboard) GetDashboardData() *DashboardData {
 func (d *Dashboard) getThreats() []ThreatInfo {
 	// Get recent threats from various sources
 	actions := d.tcellEngine.GetRecentActions()
-	
+
 	var threats []ThreatInfo
 	for _, action := range actions {
 		if len(threats) >= 20 { // Limit to recent 20 threats
 			break
 		}
-		
+
 		threat := ThreatInfo{
 			ID:          fmt.Sprintf("%d", len(threats)),
 			Type:        action.Description,
@@ -382,10 +387,31 @@ func (d *Dashboard) getThreats() []ThreatInfo {
 			Confidence:  0.8, // Default confidence
 			Actions:     []string{action.ActionType},
 		}
-		
+
 		threats = append(threats, threat)
 	}
-	
+
+	// Also include high-risk paths from Bloodhound for a holistic view
+	paths := d.bloodTracker.GetHighRiskPaths()
+	for _, path := range paths {
+		if len(threats) >= 40 { // Increase limit slightly to accommodate lateral movement threats
+			break
+		}
+
+		threat := ThreatInfo{
+			ID:          path.ID,
+			Type:        path.ThreatType,
+			Severity:    strings.ToUpper(path.AlertLevel),
+			SourceIP:    "multiple/lateral",
+			Timestamp:   path.LastSeen,
+			Description: fmt.Sprintf("Potential %s detected with score %.2f", path.ThreatType, path.Score),
+			Confidence:  path.Confidence,
+			Actions:     []string{"INVESTIGATE", "ISOLATE_SEGMENT"},
+		}
+
+		threats = append(threats, threat)
+	}
+
 	return threats
 }
 
@@ -428,13 +454,13 @@ func (d *Dashboard) getSecurityStats() map[string]interface{} {
 // getComplianceReport returns compliance status information
 func (d *Dashboard) getComplianceReport() ComplianceReport {
 	return ComplianceReport{
-		POPIAStatus:     "COMPLIANT",
-		LastAudit:       time.Now().AddDate(0, 0, -7), // Last week
-		NextAudit:       time.Now().AddDate(0, 0, 23), // In 23 days
-		Findings:        []string{}, // No findings
-		OverallScore:    98.5, // High compliance score
-		RequirementsMet: 47,   // Met requirements
-		TotalRequirements: 48, // Total requirements
+		POPIAStatus:       "COMPLIANT",
+		LastAudit:         time.Now().AddDate(0, 0, -7), // Last week
+		NextAudit:         time.Now().AddDate(0, 0, 23), // In 23 days
+		Findings:          []string{},                   // No findings
+		OverallScore:      98.5,                         // High compliance score
+		RequirementsMet:   47,                           // Met requirements
+		TotalRequirements: 48,                           // Total requirements
 	}
 }
 
@@ -453,16 +479,16 @@ func (d *Dashboard) getConfig() map[string]interface{} {
 			"deception_layer":   true,
 		},
 		"logging": map[string]interface{}{
-			"immutable":     true,
-			"integrity":     true,
-			"retention":     "365d",
-			"verification":  true,
+			"immutable":    true,
+			"integrity":    true,
+			"retention":    "365d",
+			"verification": true,
 		},
 	}
 }
 
-// isValidOrigin checks if the origin is allowed for CORS
-func isValidOrigin(origin string) bool {
+// IsAllowedOrigin checks if the origin is allowed for CORS
+func IsAllowedOrigin(origin string) bool {
 	allowedOrigins := []string{
 		"http://localhost:3000",
 		"http://127.0.0.1:3000",
@@ -471,7 +497,8 @@ func isValidOrigin(origin string) bool {
 	}
 
 	for _, allowed := range allowedOrigins {
-		if strings.HasPrefix(origin, allowed) {
+		// Use exact match to prevent origin spoofing via subdomains (e.g. localhost.attacker.com)
+		if origin == allowed {
 			return true
 		}
 	}
@@ -480,12 +507,23 @@ func isValidOrigin(origin string) bool {
 
 // GetCriticalServicesCount returns the count of critical services
 func (d *Dashboard) GetCriticalServicesCount() int {
-	// Placeholder implementation - in real implementation this would interface with hardening manager
-	return 5
+	if d.hardeningMgr == nil {
+		return 0
+	}
+	return d.hardeningMgr.GetCriticalServicesCount()
 }
 
 // GetDisabledServicesCount returns the count of disabled services
 func (d *Dashboard) GetDisabledServicesCount() int {
-	// Placeholder implementation - in real implementation this would interface with hardening manager
-	return 2
+	if d.hardeningMgr == nil {
+		return 0
+	}
+	return d.hardeningMgr.GetDisabledServicesCount()
+}
+
+// GetSecurityMetrics returns a copy of the current security metrics
+func (d *Dashboard) GetSecurityMetrics() SecurityMetrics {
+	d.mutex.RLock()
+	defer d.mutex.RUnlock()
+	return d.securityMetrics
 }

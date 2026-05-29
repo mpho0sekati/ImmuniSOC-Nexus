@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"immunisoc-nexus/proxy/internal/tcell"
 )
 
 // AttackNode represents a node in the attack path
@@ -56,6 +58,7 @@ type Tracker struct {
 	mutex     sync.RWMutex
 	alertChan chan *AttackPath
 	stopChan  chan struct{}  // Channel to signal shutdown
+	tcellEngine *tcell.Engine // Reference to T-Cell engine for automatic response
 }
 
 // NewTracker creates a new bloodhound tracker
@@ -66,12 +69,20 @@ func NewTracker() *Tracker {
 		edges:     make([]*AttackEdge, 0),
 		alertChan: make(chan *AttackPath, 100), // Buffered channel for alerts
 		stopChan:  make(chan struct{}),         // Channel to signal shutdown
+		tcellEngine: nil,                       // Will be set externally
 	}
 	
 	// Start alert processor goroutine
 	go tracker.processAlerts()
 	
 	return tracker
+}
+
+// SetTCellEngine sets the T-Cell engine for automatic response to detected threats
+func (t *Tracker) SetTCellEngine(engine *tcell.Engine) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.tcellEngine = engine
 }
 
 // TrackRequest tracks a request and potentially creates attack path nodes
@@ -210,6 +221,61 @@ func (t *Tracker) processAlerts() {
 		case path := <-t.alertChan:
 			// In a real implementation, this would send alerts to SIEM, etc.
 			fmt.Printf("[BLOODHOUND ALERT] Potential threat detected: %+v\n", path)
+			
+			// Trigger T-Cell engine to respond to the detected threat
+			t.mutex.RLock()
+			engine := t.tcellEngine
+			t.mutex.RUnlock()
+			
+			if engine != nil {
+				// Map threat level to containment level
+				var level tcell.ContainmentLevel
+				switch path.AlertLevel {
+				case "low":
+					level = tcell.Low
+				case "medium":
+					level = tcell.Medium
+				case "high":
+					level = tcell.High
+				case "critical":
+					level = tcell.Critical
+				default:
+					level = tcell.Low
+				}
+				
+				// Extract IP from the path (this is a simplification - in a real implementation,
+				// we would have more specific information about the attacking IP)
+				var ip string
+				var sessionID string
+				
+				// Try to get IP from the start node
+				if startNode, exists := t.nodes[path.StartNode]; exists {
+					ip = startNode.SourceIP
+					sessionID = startNode.SessionID
+				} else {
+					// If no start node, use a default
+					ip = "unknown"
+					sessionID = "unknown_session"
+				}
+				
+				// Create threat details map
+				threatDetails := map[string]interface{}{
+					"threat_type":       path.ThreatType,
+					"attack_path_score": path.Score,
+					"confidence":        path.Confidence,
+					"alert_level":       path.AlertLevel,
+					"first_seen":        path.FirstSeen,
+					"last_seen":         path.LastSeen,
+				}
+				
+				// Process the threat with T-Cell engine
+				_, err := engine.ProcessThreat(ip, sessionID, "", level, threatDetails)
+				if err != nil {
+					fmt.Printf("[BLOODHOUND] Failed to process threat with T-Cell engine: %v\n", err)
+				} else {
+					fmt.Printf("[BLOODHOUND] Threat processed by T-Cell engine: %s\n", path.ThreatType)
+				}
+			}
 		case <-t.stopChan:
 			// Close the alert channel and exit the goroutine
 			close(t.alertChan)

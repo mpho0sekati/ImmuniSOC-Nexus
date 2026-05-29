@@ -21,13 +21,13 @@ import (
 func TestDashboardCreation(t *testing.T) {
 	bt := bloodhound.NewTracker()
 	cf := &classification.Classifier{}
-	dg := deception.NewGenerator("test-secret")  // Providing required parameter
+	dg := deception.NewGenerator("test-secret") // Providing required parameter
 	hm := &hardening.HardeningManager{}
 	msm := microseg.NewMicrosegmentationManager(func(msg string) {})
 	il := monocyte.NewMonocyteLogger("./test.log", "test-secret")
 	oc := opa.NewOpaClient()
 	te := tcell.NewEngine()
-	rm := rbac.NewRBACManager(oc, nil)  // Providing required recertification manager
+	rm := rbac.NewRBACManager(oc, nil) // Providing required recertification manager
 
 	dashboard := NewDashboard(bt, cf, dg, hm, msm, il, oc, te, rm)
 
@@ -39,13 +39,13 @@ func TestDashboardCreation(t *testing.T) {
 func TestDashboardAPIEndpoints(t *testing.T) {
 	bt := bloodhound.NewTracker()
 	cf := &classification.Classifier{}
-	dg := deception.NewGenerator("test-secret")  // Providing required parameter
+	dg := deception.NewGenerator("test-secret") // Providing required parameter
 	hm := &hardening.HardeningManager{}
 	msm := microseg.NewMicrosegmentationManager(func(msg string) {})
 	il := monocyte.NewMonocyteLogger("./test.log", "test-secret")
 	oc := opa.NewOpaClient()
 	te := tcell.NewEngine()
-	rm := rbac.NewRBACManager(oc, nil)  // Providing required recertification manager
+	rm := rbac.NewRBACManager(oc, nil) // Providing required recertification manager
 
 	dashboard := NewDashboard(bt, cf, dg, hm, msm, il, oc, te, rm)
 	handler := dashboard.Handler()
@@ -53,27 +53,27 @@ func TestDashboardAPIEndpoints(t *testing.T) {
 	t.Run("Dashboard Data Endpoint", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/dashboard", nil)
 		w := httptest.NewRecorder()
-		
+
 		handler.ServeHTTP(w, req)
-		
+
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
 		}
-		
+
 		if w.Header().Get("Content-Type") != "application/json" {
 			t.Errorf("Expected Content-Type application/json, got %s", w.Header().Get("Content-Type"))
 		}
-		
+
 		var data DashboardData
 		if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
 			t.Errorf("Failed to unmarshal dashboard data: %v", err)
 		}
-		
+
 		// Verify structure
 		if data.Version == "" {
 			t.Error("Expected version to be set")
 		}
-		
+
 		if data.Metrics.EncryptionStatus == "" {
 			t.Error("Expected encryption status to be set")
 		}
@@ -82,18 +82,18 @@ func TestDashboardAPIEndpoints(t *testing.T) {
 	t.Run("Metrics Endpoint", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/metrics", nil)
 		w := httptest.NewRecorder()
-		
+
 		handler.ServeHTTP(w, req)
-		
+
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
 		}
-		
+
 		var metrics SecurityMetrics
 		if err := json.Unmarshal(w.Body.Bytes(), &metrics); err != nil {
 			t.Errorf("Failed to unmarshal metrics: %v", err)
 		}
-		
+
 		if metrics.EncryptionStatus == "" {
 			t.Error("Expected encryption status to be set")
 		}
@@ -102,18 +102,18 @@ func TestDashboardAPIEndpoints(t *testing.T) {
 	t.Run("Health Endpoint", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api/health", nil)
 		w := httptest.NewRecorder()
-		
+
 		handler.ServeHTTP(w, req)
-		
+
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
 		}
-		
+
 		var health map[string]interface{}
 		if err := json.Unmarshal(w.Body.Bytes(), &health); err != nil {
 			t.Errorf("Failed to unmarshal health: %v", err)
 		}
-		
+
 		status, ok := health["status"]
 		if !ok || status != "healthy" {
 			t.Error("Expected health status to be 'healthy'")
@@ -123,9 +123,9 @@ func TestDashboardAPIEndpoints(t *testing.T) {
 	t.Run("Method Not Allowed", func(t *testing.T) {
 		req := httptest.NewRequest("POST", "/api/metrics", nil)
 		w := httptest.NewRecorder()
-		
+
 		handler.ServeHTTP(w, req)
-		
+
 		if w.Code != http.StatusMethodNotAllowed {
 			t.Errorf("Expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
 		}
@@ -135,13 +135,13 @@ func TestDashboardAPIEndpoints(t *testing.T) {
 func TestDashboardMetricsUpdate(t *testing.T) {
 	bt := bloodhound.NewTracker()
 	cf := &classification.Classifier{}
-	dg := deception.NewGenerator("test-secret")  // Providing required parameter
+	dg := deception.NewGenerator("test-secret") // Providing required parameter
 	hm := &hardening.HardeningManager{}
 	msm := microseg.NewMicrosegmentationManager(func(msg string) {})
 	il := monocyte.NewMonocyteLogger("./test.log", "test-secret")
 	oc := opa.NewOpaClient()
 	te := tcell.NewEngine()
-	rm := rbac.NewRBACManager(oc, nil)  // Providing required recertification manager
+	rm := rbac.NewRBACManager(oc, nil) // Providing required recertification manager
 
 	dashboard := NewDashboard(bt, cf, dg, hm, msm, il, oc, te, rm)
 
@@ -169,13 +169,13 @@ func TestDashboardMetricsUpdate(t *testing.T) {
 func TestCalculateRiskScore(t *testing.T) {
 	bt := bloodhound.NewTracker()
 	cf := &classification.Classifier{}
-	dg := deception.NewGenerator("test-secret")  // Providing required parameter
+	dg := deception.NewGenerator("test-secret") // Providing required parameter
 	hm := &hardening.HardeningManager{}
 	msm := microseg.NewMicrosegmentationManager(func(msg string) {})
 	il := monocyte.NewMonocyteLogger("./test.log", "test-secret")
 	oc := opa.NewOpaClient()
 	te := tcell.NewEngine()
-	rm := rbac.NewRBACManager(oc, nil)  // Providing required recertification manager
+	rm := rbac.NewRBACManager(oc, nil) // Providing required recertification manager
 
 	dashboard := NewDashboard(bt, cf, dg, hm, msm, il, oc, te, rm)
 
@@ -214,7 +214,7 @@ func TestIsValidOrigin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isValidOrigin(tt.origin)
+			result := IsAllowedOrigin(tt.origin)
 			if result != tt.expected {
 				t.Errorf("isValidOrigin(%q) = %v, want %v", tt.origin, result, tt.expected)
 			}
@@ -225,17 +225,17 @@ func TestIsValidOrigin(t *testing.T) {
 func TestDashboardDataStructure(t *testing.T) {
 	bt := bloodhound.NewTracker()
 	cf := &classification.Classifier{}
-	dg := deception.NewGenerator("test-secret")  // Providing required parameter
+	dg := deception.NewGenerator("test-secret") // Providing required parameter
 	hm := &hardening.HardeningManager{}
 	msm := microseg.NewMicrosegmentationManager(func(msg string) {})
 	il := monocyte.NewMonocyteLogger("./test.log", "test-secret")
 	oc := opa.NewOpaClient()
 	te := tcell.NewEngine()
-	rm := rbac.NewRBACManager(oc, nil)  // Providing required recertification manager
+	rm := rbac.NewRBACManager(oc, nil) // Providing required recertification manager
 
 	dashboard := NewDashboard(bt, cf, dg, hm, msm, il, oc, te, rm)
 
-	data := dashboard.GetDashboardData()  // Changed from getDashboardData to GetDashboardData
+	data := dashboard.GetDashboardData() // Changed from getDashboardData to GetDashboardData
 
 	if data == nil {
 		t.Fatal("Expected dashboard data to be returned, got nil")

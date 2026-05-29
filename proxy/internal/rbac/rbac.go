@@ -384,6 +384,11 @@ func (rm *RBACManager) ApproveJITPermission(jitID, approverID string) error {
 		return fmt.Errorf("JIT permission request not found: %s", jitID)
 	}
 
+	// Separation of Duties: Ensure requester is not the approver
+	if jitPerm.UserID == approverID {
+		return fmt.Errorf("separation of duties violation: users cannot approve their own JIT requests")
+	}
+
 	jitPerm.Approved = true
 	jitPerm.ApprovedBy = approverID
 
@@ -446,10 +451,13 @@ func (rm *RBACManager) RBACMiddleware(next http.Handler) http.Handler {
 
 		// Map HTTP methods to RBAC actions
 		action := "read"
-		if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
+		switch r.Method {
+		case "POST", "PUT", "PATCH":
 			action = "write"
-		} else if r.Method == "DELETE" {
+		case "DELETE":
 			action = "delete"
+		default:
+			action = "read"
 		}
 
 		// Runtime Least Privilege Enforcement
@@ -482,6 +490,14 @@ func (rm *RBACManager) GetRoleName(role UserRole) string {
 		return "Unknown"
 	}
 	return def.Name
+}
+
+// HasPermission checks if a role has the required permissions (simplified role check)
+func HasPermission(userRole, requiredRole UserRole) bool {
+	if userRole == SystemAdministrator {
+		return true // Admins have all permissions
+	}
+	return userRole == requiredRole
 }
 
 // Helper function to generate session IDs (implementation would use crypto/rand)

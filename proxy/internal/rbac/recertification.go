@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -48,7 +49,7 @@ func (rc *RecertificationManager) ScheduleCertification(userID string, role User
 	defer rc.Unlock()
 
 	certID := generateCertificationID()
-	
+
 	certification := &AccessCertification{
 		ID:          certID,
 		UserID:      userID,
@@ -151,11 +152,17 @@ func (rc *RecertificationManager) CleanupExpiredCertifications() {
 }
 
 // StartCertificationReminders starts a background routine to remind managers about upcoming certifications
-func (rc *RecertificationManager) StartCertificationReminders() {
+func (rc *RecertificationManager) StartCertificationReminders(ctx context.Context) {
 	ticker := time.NewTicker(24 * time.Hour) // Daily check
 	go func() {
-		for range ticker.C {
-			rc.processCertificationReminders()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				rc.processCertificationReminders()
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 }
@@ -169,12 +176,12 @@ func (rc *RecertificationManager) processCertificationReminders() {
 	reminderThreshold := now.AddDate(0, 0, 7) // 7 days ahead
 
 	for _, cert := range rc.certifications {
-		if cert.Status == Pending && 
-		   now.Before(cert.DueDate) && 
-		   cert.DueDate.Before(reminderThreshold) {
+		if cert.Status == Pending &&
+			now.Before(cert.DueDate) &&
+			cert.DueDate.Before(reminderThreshold) {
 			// In a real system, this would send a notification to the manager
 			// For now, we'll just log it
-			fmt.Printf("REMINDER: Access certification for user %s due on %s. Manager: %s\n", 
+			fmt.Printf("REMINDER: Access certification for user %s due on %s. Manager: %s\n",
 				cert.UserID, cert.DueDate.Format("2006-01-02"), cert.ManagerID)
 		}
 	}
