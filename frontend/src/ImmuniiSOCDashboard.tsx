@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 const ImmuniSOCDashboard = () => {
-  const [metrics, setMetrics] = useState({
+  const [metrics] = useState({
     internalChecks: 52041,
     activeQuarantines: 2,
     canaryTriggers: 0
