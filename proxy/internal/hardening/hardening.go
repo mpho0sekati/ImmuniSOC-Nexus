@@ -11,6 +11,7 @@ import (
 
 	"immunisoc-nexus/proxy/internal/classification"
 	"immunisoc-nexus/proxy/internal/microseg"
+	"immunisoc-nexus/proxy/internal/netutil"
 )
 
 // ServiceInfo represents information about a service
@@ -295,25 +296,7 @@ func (hm *HardeningManager) isAccessPermitted(clientIP, path string) bool {
 
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header first
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		return strings.Split(forwarded, ",")[0]
-	}
-
-	// Check X-Real-IP header
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return realIP
-	}
-
-	// Fallback to RemoteAddr
-	host := r.RemoteAddr
-	if colonIndex := strings.LastIndex(host, ":"); colonIndex != -1 {
-		host = host[:colonIndex]
-	}
-
-	return host
+	return netutil.ClientIP(r)
 }
 
 // getPortFromRequest extracts the port from the request

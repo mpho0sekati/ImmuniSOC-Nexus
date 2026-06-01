@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"immunisoc-nexus/proxy/internal/netutil"
 )
 
 // Segment represents a network segment with its own security policies
@@ -453,20 +455,5 @@ func (m *MicrosegmentationManager) MicrosegmentationMiddleware(next http.Handler
 
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		ip := strings.Split(forwarded, ",")[0]
-		return strings.TrimSpace(ip)
-	}
-
-	// Check X-Real-IP header
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return realIP
-	}
-
-	// Use RemoteAddr as fallback
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return host
+	return netutil.ClientIP(r)
 }

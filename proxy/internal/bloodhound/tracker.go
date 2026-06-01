@@ -2,13 +2,13 @@ package bloodhound
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"immunisoc-nexus/proxy/internal/netutil"
 	"immunisoc-nexus/proxy/internal/tcell"
 )
 
@@ -37,44 +37,44 @@ type AttackEdge struct {
 
 // AttackPath represents a complete attack path/lateral movement
 type AttackPath struct {
-	ID           string       `json:"id"`
-	StartNode    string       `json:"start_node"`
-	EndNode      string       `json:"end_node"`
-	Edges        []AttackEdge `json:"edges"`
-	AlertLevel   string       `json:"alert_level"` // low, medium, high, critical
-	Score        float64      `json:"score"`
-	FirstSeen    time.Time    `json:"first_seen"`
-	LastSeen     time.Time    `json:"last_seen"`
-	IsCompleted  bool         `json:"is_completed"`
-	ThreatType   string       `json:"threat_type"` // recon, lateral_movement, privilege_escalation, exfiltration
-	Confidence   float64      `json:"confidence"`
+	ID          string       `json:"id"`
+	StartNode   string       `json:"start_node"`
+	EndNode     string       `json:"end_node"`
+	Edges       []AttackEdge `json:"edges"`
+	AlertLevel  string       `json:"alert_level"` // low, medium, high, critical
+	Score       float64      `json:"score"`
+	FirstSeen   time.Time    `json:"first_seen"`
+	LastSeen    time.Time    `json:"last_seen"`
+	IsCompleted bool         `json:"is_completed"`
+	ThreatType  string       `json:"threat_type"` // recon, lateral_movement, privilege_escalation, exfiltration
+	Confidence  float64      `json:"confidence"`
 }
 
 // Tracker manages attack path tracking and detection
 type Tracker struct {
-	nodes     map[string]*AttackNode
-	paths     map[string]*AttackPath
-	edges     []*AttackEdge
-	mutex     sync.RWMutex
-	alertChan chan *AttackPath
-	stopChan  chan struct{}  // Channel to signal shutdown
+	nodes       map[string]*AttackNode
+	paths       map[string]*AttackPath
+	edges       []*AttackEdge
+	mutex       sync.RWMutex
+	alertChan   chan *AttackPath
+	stopChan    chan struct{} // Channel to signal shutdown
 	tcellEngine *tcell.Engine // Reference to T-Cell engine for automatic response
 }
 
 // NewTracker creates a new bloodhound tracker
 func NewTracker() *Tracker {
 	tracker := &Tracker{
-		nodes:     make(map[string]*AttackNode),
-		paths:     make(map[string]*AttackPath),
-		edges:     make([]*AttackEdge, 0),
-		alertChan: make(chan *AttackPath, 100), // Buffered channel for alerts
-		stopChan:  make(chan struct{}),         // Channel to signal shutdown
-		tcellEngine: nil,                       // Will be set externally
+		nodes:       make(map[string]*AttackNode),
+		paths:       make(map[string]*AttackPath),
+		edges:       make([]*AttackEdge, 0),
+		alertChan:   make(chan *AttackPath, 100), // Buffered channel for alerts
+		stopChan:    make(chan struct{}),         // Channel to signal shutdown
+		tcellEngine: nil,                         // Will be set externally
 	}
-	
+
 	// Start alert processor goroutine
 	go tracker.processAlerts()
-	
+
 	return tracker
 }
 
@@ -89,9 +89,9 @@ func (t *Tracker) SetTCellEngine(engine *tcell.Engine) {
 func (t *Tracker) TrackRequest(r *http.Request, isHoneytrap bool) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	
+
 	nodeID := generateNodeID(r)
-	
+
 	// Create attack node
 	node := &AttackNode{
 		ID:          nodeID,
@@ -105,9 +105,9 @@ func (t *Tracker) TrackRequest(r *http.Request, isHoneytrap bool) {
 		IsHoneytrap: isHoneytrap,
 		Alert:       isHoneytrap, // Alert if it's a honeytrap hit
 	}
-	
+
 	t.nodes[nodeID] = node
-	
+
 	// If this is a honeytrap hit, trigger an alert
 	if isHoneytrap {
 		path := &AttackPath{
@@ -122,7 +122,7 @@ func (t *Tracker) TrackRequest(r *http.Request, isHoneytrap bool) {
 			ThreatType:  "honeytrap_access",
 			Confidence:  1.0,
 		}
-		
+
 		t.paths[path.ID] = path
 		select {
 		case t.alertChan <- path:
@@ -137,7 +137,7 @@ func (t *Tracker) TrackRequest(r *http.Request, isHoneytrap bool) {
 func (t *Tracker) TrackLateralMovement(fromNodeID, toNodeID, method string) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	
+
 	edge := &AttackEdge{
 		FromNodeID: fromNodeID,
 		ToNodeID:   toNodeID,
@@ -145,16 +145,16 @@ func (t *Tracker) TrackLateralMovement(fromNodeID, toNodeID, method string) {
 		Method:     method,
 		Alert:      false,
 	}
-	
+
 	t.edges = append(t.edges, edge)
-	
+
 	// Check if this constitutes lateral movement worthy of alert
 	fromNode, fromOk := t.nodes[fromNodeID]
 	toNode, toOk := t.nodes[toNodeID]
-	
+
 	if fromOk && toOk && (fromNode.IsHoneytrap || toNode.IsHoneytrap) {
 		pathID := fmt.Sprintf("lateral_%s_to_%s", fromNodeID, toNodeID)
-		
+
 		attackPath := &AttackPath{
 			ID:          pathID,
 			StartNode:   fromNodeID,
@@ -168,13 +168,13 @@ func (t *Tracker) TrackLateralMovement(fromNodeID, toNodeID, method string) {
 			ThreatType:  "lateral_movement",
 			Confidence:  0.8,
 		}
-		
+
 		t.paths[pathID] = attackPath
 		edge.Alert = true
 		attackPath.AlertLevel = "critical"
 		attackPath.Confidence = 0.95
 		attackPath.IsCompleted = true
-		
+
 		select {
 		case t.alertChan <- attackPath:
 		default:
@@ -188,12 +188,12 @@ func (t *Tracker) TrackLateralMovement(fromNodeID, toNodeID, method string) {
 func (t *Tracker) GetAttackPaths() []*AttackPath {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-	
+
 	paths := make([]*AttackPath, 0, len(t.paths))
 	for _, path := range t.paths {
 		paths = append(paths, path)
 	}
-	
+
 	return paths
 }
 
@@ -201,16 +201,16 @@ func (t *Tracker) GetAttackPaths() []*AttackPath {
 func (t *Tracker) GetRecentAttacks(hours int) []*AttackPath {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-	
+
 	threshold := time.Now().Add(-time.Duration(hours) * time.Hour)
 	recentPaths := make([]*AttackPath, 0)
-	
+
 	for _, path := range t.paths {
 		if path.LastSeen.After(threshold) {
 			recentPaths = append(recentPaths, path)
 		}
 	}
-	
+
 	return recentPaths
 }
 
@@ -221,12 +221,12 @@ func (t *Tracker) processAlerts() {
 		case path := <-t.alertChan:
 			// In a real implementation, this would send alerts to SIEM, etc.
 			fmt.Printf("[BLOODHOUND ALERT] Potential threat detected: %+v\n", path)
-			
+
 			// Trigger T-Cell engine to respond to the detected threat
 			t.mutex.RLock()
 			engine := t.tcellEngine
 			t.mutex.RUnlock()
-			
+
 			if engine != nil {
 				// Map threat level to containment level
 				var level tcell.ContainmentLevel
@@ -242,12 +242,12 @@ func (t *Tracker) processAlerts() {
 				default:
 					level = tcell.Low
 				}
-				
+
 				// Extract IP from the path (this is a simplification - in a real implementation,
 				// we would have more specific information about the attacking IP)
 				var ip string
 				var sessionID string
-				
+
 				// Try to get IP from the start node
 				if startNode, exists := t.nodes[path.StartNode]; exists {
 					ip = startNode.SourceIP
@@ -257,7 +257,7 @@ func (t *Tracker) processAlerts() {
 					ip = "unknown"
 					sessionID = "unknown_session"
 				}
-				
+
 				// Create threat details map
 				threatDetails := map[string]interface{}{
 					"threat_type":       path.ThreatType,
@@ -267,7 +267,7 @@ func (t *Tracker) processAlerts() {
 					"first_seen":        path.FirstSeen,
 					"last_seen":         path.LastSeen,
 				}
-				
+
 				// Process the threat with T-Cell engine
 				_, err := engine.ProcessThreat(ip, sessionID, "", level, threatDetails)
 				if err != nil {
@@ -296,19 +296,7 @@ func generateNodeID(r *http.Request) string {
 
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		ips := strings.Split(forwarded, ",")
-		return strings.TrimSpace(ips[0])
-	}
-	
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return realIP
-	}
-	
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return host
+	return netutil.ClientIP(r)
 }
 
 // getSessionID extracts session ID from request with validation
@@ -320,7 +308,7 @@ func getSessionID(r *http.Request) string {
 			return sessionCookie.Value
 		}
 	}
-	
+
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {
 		// If it's a Bearer token, extract the token part
@@ -336,7 +324,7 @@ func getSessionID(r *http.Request) string {
 			}
 		}
 	}
-	
+
 	return "unknown_session"
 }
 
@@ -345,13 +333,13 @@ func isValidSessionID(id string) bool {
 	if id == "" || len(id) < 16 {
 		return false
 	}
-	
+
 	// Check if it looks like a UUID
 	uuidRegex := regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	if uuidRegex.MatchString(id) {
 		return true
 	}
-	
+
 	// Check if it's a long, random-looking string with good entropy
 	// For non-UUID session IDs, check for sufficient randomness
 	return hasSufficientEntropy(id)
@@ -362,13 +350,13 @@ func hasSufficientEntropy(s string) bool {
 	if len(s) < 22 { // Minimum recommended length for session tokens
 		return false
 	}
-	
+
 	// Count character diversity
 	charSet := make(map[rune]bool)
 	for _, r := range s {
 		charSet[r] = true
 	}
-	
+
 	// Require at least 50% character diversity
 	return float64(len(charSet))/float64(len(s)) >= 0.5
 }
@@ -377,12 +365,12 @@ func hasSufficientEntropy(s string) bool {
 func (t *Tracker) GetNodes() []*AttackNode {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-	
+
 	nodes := make([]*AttackNode, 0, len(t.nodes))
 	for _, node := range t.nodes {
 		nodes = append(nodes, node)
 	}
-	
+
 	return nodes
 }
 
@@ -390,15 +378,15 @@ func (t *Tracker) GetNodes() []*AttackNode {
 func (t *Tracker) GetHighRiskPaths() []*AttackPath {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-	
+
 	highRiskPaths := make([]*AttackPath, 0)
-	
+
 	for _, path := range t.paths {
 		if path.Score >= 7.0 {
 			highRiskPaths = append(highRiskPaths, path)
 		}
 	}
-	
+
 	return highRiskPaths
 }
 

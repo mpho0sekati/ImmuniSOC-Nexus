@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 
+	"immunisoc-nexus/proxy/internal/netutil"
 	"immunisoc-nexus/proxy/internal/opa"
 	"immunisoc-nexus/proxy/internal/tcell"
 )
@@ -66,20 +66,20 @@ func (ep *EgressProtection) EgressMiddleware(next http.Handler) http.Handler {
 			isBlocked, reason := ep.scanForSensitiveData(responseBody)
 			if isBlocked {
 				log.Printf("Egress protection triggered: %s", reason)
-				
+
 				// Trigger T-Cell engine to respond to the egress violation
 				if ep.tcellEngine != nil {
 					ip := getClientIP(r)
 					sessionID := getSessionID(r)
-					
+
 					threatDetails := map[string]interface{}{
-						"threat_type":       "egress_violation",
-						"violation_reason":  reason,
-						"request_method":    r.Method,
-						"request_path":      r.URL.Path,
-						"response_size":     len(responseBody),
+						"threat_type":      "egress_violation",
+						"violation_reason": reason,
+						"request_method":   r.Method,
+						"request_path":     r.URL.Path,
+						"response_size":    len(responseBody),
 					}
-					
+
 					// Use High containment level for egress violations
 					_, err := ep.tcellEngine.ProcessThreat(ip, sessionID, "", tcell.High, threatDetails)
 					if err != nil {
@@ -88,7 +88,7 @@ func (ep *EgressProtection) EgressMiddleware(next http.Handler) http.Handler {
 						log.Printf("[EGRESS] Egress violation processed by T-Cell engine from IP: %s", ip)
 					}
 				}
-				
+
 				http.Error(w, "Access denied", http.StatusForbidden)
 				return
 			}
@@ -256,19 +256,7 @@ func truncateString(s string, maxLen int) string {
 
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		ips := strings.Split(forwarded, ",")
-		return strings.TrimSpace(ips[0])
-	}
-	
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		return realIP
-	}
-	
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return host
+	return netutil.ClientIP(r)
 }
 
 // getSessionID extracts session ID from request with validation
@@ -279,7 +267,7 @@ func getSessionID(r *http.Request) string {
 		// In a real implementation, you'd validate the session ID
 		return sessionCookie.Value
 	}
-	
+
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {
 		// If it's a Bearer token, extract the token part
@@ -290,6 +278,6 @@ func getSessionID(r *http.Request) string {
 			return authHeader
 		}
 	}
-	
+
 	return "unknown_session"
 }

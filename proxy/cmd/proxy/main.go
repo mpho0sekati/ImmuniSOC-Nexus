@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -17,9 +21,9 @@ import (
 
 	"golang.org/x/time/rate"
 
+	config "immunisoc-nexus/proxy/internal"
 	"immunisoc-nexus/proxy/internal/bloodhound"
 	"immunisoc-nexus/proxy/internal/classification"
-	"immunisoc-nexus/proxy/internal/config"
 	"immunisoc-nexus/proxy/internal/dashboard"
 	"immunisoc-nexus/proxy/internal/deception"
 	"immunisoc-nexus/proxy/internal/errors"
@@ -27,6 +31,7 @@ import (
 	"immunisoc-nexus/proxy/internal/microseg"
 	"immunisoc-nexus/proxy/internal/middleware"
 	"immunisoc-nexus/proxy/internal/monocyte"
+	"immunisoc-nexus/proxy/internal/netutil"
 	"immunisoc-nexus/proxy/internal/opa"
 	"immunisoc-nexus/proxy/internal/rbac"
 	"immunisoc-nexus/proxy/internal/tcell"
@@ -77,11 +82,28 @@ import (
 
 // isAllowedOrigin checks if the origin is allowed for CORS
 func isAllowedOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
 	if secureDashboard != nil {
 		return dashboard.IsAllowedOrigin(origin)
 	}
 	// Fallback during initialization or if dashboard fails to start
-	return strings.HasPrefix(origin, "http://localhost")
+	defaultOrigins := []string{
+		"http://localhost:3000",
+		"http://127.0.0.1:3000",
+	}
+	for _, allowed := range defaultOrigins {
+		if origin == allowed {
+			return true
+		}
+	}
+	for _, allowed := range strings.Split(os.Getenv("DASHBOARD_ALLOWED_ORIGINS"), ",") {
+		if origin == strings.TrimSpace(allowed) {
+			return true
+		}
+	}
+	return false
 }
 
 // validateTokenComplexity ensures tokens meet security requirements
@@ -111,7 +133,7 @@ func validateTokenComplexity(name, token string) error {
 	if !(hasUpper && hasLower && hasDigit && hasSpecial) {
 		return errors.ValidationError(fmt.Sprintf("%s must contain uppercase, lowercase, digit, and special characters", name))
 	}
-	
+
 	return nil
 }
 
@@ -133,7 +155,7 @@ func setupDefaultSegments() error {
 
 	// Add default members to segments
 	// This is just placeholder - in real implementation, you'd add actual IPs/services
-	
+
 	return nil
 }
 
@@ -333,9 +355,15 @@ func rbacProtectedEndpoint(requiredToken string, requiredRole rbac.UserRole, han
 			return
 		}
 
-		// Simulate extracting user role from token/session
-		// In real implementation, this should decode token or fetch from session store
-		userRole := rbac.SystemAdministrator // Example: mock role assignment
+		userRole, ok := roleFromRequest(r)
+		if !ok {
+			http.Error(w, "Forbidden: Valid user role required", http.StatusForbidden)
+			logSecurityEvent("ROLE_RESOLUTION_FAILED", map[string]interface{}{
+				"path": r.URL.Path,
+				"ip":   getClientIP(r),
+			})
+			return
+		}
 
 		if !rbac.HasPermission(userRole, requiredRole) {
 			http.Error(w, "Forbidden: Insufficient permissions", http.StatusForbidden)
@@ -352,21 +380,180 @@ func rbacProtectedEndpoint(requiredToken string, requiredRole rbac.UserRole, han
 	})
 }
 
+func roleFromRequest(r *http.Request) (rbac.UserRole, bool) {
+	token := strings.TrimSpace(r.Header.Get(DefaultSessionHeader))
+	if token == "" {
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+			token = strings.TrimSpace(authHeader[7:])
+		}
+	}
+	if token == "" {
+		return 0, false
+	}
+
+	claims, err := verifySignedSession(token, jwtSigningSecret())
+	if err != nil {
+		return 0, false
+	}
+	return roleFromString(claims.Role)
+}
+
+type signedSessionClaims struct {
+	Subject string `json:"sub"`
+	Role    string `json:"role"`
+	Expiry  int64  `json:"exp"`
+}
+
+func verifySignedSession(token, secret string) (*signedSessionClaims, error) {
+	if secret == "" {
+		return nil, fmt.Errorf("JWT signing secret is not configured")
+	}
+
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid signed session format")
+	}
+
+	expected := signSessionPayload(parts[0], secret)
+	if subtle.ConstantTimeCompare([]byte(parts[1]), []byte(expected)) != 1 {
+		return nil, fmt.Errorf("invalid signed session signature")
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("invalid signed session payload: %w", err)
+	}
+
+	var claims signedSessionClaims
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return nil, fmt.Errorf("invalid signed session claims: %w", err)
+	}
+	if claims.Subject == "" || claims.Role == "" || claims.Expiry <= time.Now().Unix() {
+		return nil, fmt.Errorf("signed session claims are incomplete or expired")
+	}
+
+	return &claims, nil
+}
+
+func signSessionPayload(encodedPayload, secret string) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(encodedPayload))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func jwtSigningSecret() string {
+	if appConfig != nil {
+		return appConfig.JWTSecret
+	}
+	return os.Getenv("JWT_SECRET")
+}
+
+func roleFromString(role string) (rbac.UserRole, bool) {
+	switch strings.TrimSpace(strings.ToLower(role)) {
+	case "auditor":
+		return rbac.Auditor, true
+	case "security_analyst", "security-analyst", "securityanalyst":
+		return rbac.SecurityAnalyst, true
+	case "system_administrator", "system-administrator", "systemadministrator", "admin":
+		return rbac.SystemAdministrator, true
+	case "incident_responder", "incident-responder", "incidentresponder":
+		return rbac.IncidentResponder, true
+	case "business_user", "business-user", "businessuser":
+		return rbac.BusinessUser, true
+	default:
+		return 0, false
+	}
+}
+
 // popiaCompliance applies POPIA compliance measures
 func popiaCompliance(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isPOPIACompliantRequest(r) {
+			logSecurityEvent("POPIA_COMPLIANCE_DENIED", map[string]interface{}{
+				"path": r.URL.Path,
+				"ip":   getClientIP(r),
+			})
+			http.Error(w, "Access denied: POPIA compliance requirements not met", http.StatusForbidden)
+			return
+		}
+
 		// Log the request for compliance purposes using the correct API
 		logEntry := fmt.Sprintf("ACCESS:%s:%s:%s", getClientIP(r), r.Method, r.URL.Path)
-		if err := immutableLogger.Append(logEntry); err != nil {
-			log.Printf("Error appending to log: %v", err)
+		if immutableLogger != nil {
+			if err := immutableLogger.Append(logEntry); err != nil {
+				log.Printf("Error appending to log: %v", err)
+			}
+		} else {
+			log.Printf("Compliance log skipped because immutable logger is not initialized")
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
 
+func isPOPIACompliantRequest(r *http.Request) bool {
+	purpose := strings.TrimSpace(r.Header.Get("X-PopIA-Purpose"))
+	if purpose == "" {
+		return false
+	}
+
+	consent := strings.EqualFold(strings.TrimSpace(r.Header.Get("X-PopIA-Consent")), "true")
+	if !consent {
+		return false
+	}
+
+	retentionDays, err := strconv.Atoi(strings.TrimSpace(r.Header.Get("X-PopIA-Retention-Days")))
+	if err != nil || retentionDays <= 0 || retentionDays > 365 {
+		return false
+	}
+
+	fields := parseHeaderList(r.Header.Get("X-PopIA-Fields"))
+	if len(fields) == 0 {
+		return false
+	}
+
+	allowedFields, ok := popiaEssentialFields()[purpose]
+	if !ok {
+		return false
+	}
+
+	for _, field := range fields {
+		if !allowedFields[field] {
+			return false
+		}
+	}
+	return true
+}
+
+func parseHeaderList(value string) []string {
+	var fields []string
+	for _, part := range strings.Split(value, ",") {
+		field := strings.TrimSpace(part)
+		if field != "" {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+func popiaEssentialFields() map[string]map[string]bool {
+	return map[string]map[string]bool{
+		"CUSTOMER_SERVICE":      {"personal_id": true, "contact_info": true},
+		"IDENTITY_VERIFICATION": {"personal_id": true, "identity_docs": true},
+		"FRAUD_PREVENTION":      {"transaction_history": true, "risk_indicators": true},
+		"LEGAL_COMPLIANCE":      {"audit_logs": true, "legal_docs": true},
+		"CONSENTED_MARKETING":   {"preferences": true, "contact_info": true},
+	}
+}
+
 // logSecurityEvent logs security-relevant events to the immutable logger
 func logSecurityEvent(eventType string, details map[string]interface{}) {
+	if immutableLogger == nil {
+		log.Printf("Security event skipped because immutable logger is not initialized: %s", eventType)
+		return
+	}
+
 	eventJSON, err := json.Marshal(details)
 	if err != nil {
 		log.Printf("Error marshaling security event: %v", err)
@@ -380,7 +567,9 @@ func logSecurityEvent(eventType string, details map[string]interface{}) {
 
 // Constants for configuration
 const (
-	DefaultAdminHeader = "X-Admin-Token"
+	DefaultAdminHeader   = "X-Admin-Token"
+	DefaultRoleHeader    = "X-User-Role"
+	DefaultSessionHeader = "X-Admin-Session"
 )
 
 // Global instances for deception, tracking, and healing
@@ -450,12 +639,7 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
-	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return ip
+	return netutil.ClientIP(r)
 }
 
 // hasDirectoryTraversal checks for common directory traversal patterns
@@ -526,7 +710,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
-	
+
 	// Validate configuration
 	if err := appConfig.Validate(); err != nil {
 		log.Fatalf("Configuration validation failed: %v", err)
@@ -547,9 +731,7 @@ func main() {
 		os.Getenv("SERVER_CERT_PATH"),
 		os.Getenv("SERVER_KEY_PATH"))
 	if err != nil {
-		log.Printf("Warning: Secure transport not initialized: %v", err)
-		// Fallback to nil transport which will be handled gracefully
-		secureTransport = nil
+		log.Fatalf("Secure transport initialization failed; refusing to start without mTLS: %v", err)
 	}
 
 	// Initialize classification engine
@@ -639,6 +821,7 @@ func main() {
 
 	// Wrap the root multiplexer with global security hardening and headers
 	finalHandler := hardeningMgr.ApplyHardeningMiddleware(mux)
+	finalHandler = middleware.InputValidationMiddleware(finalHandler)
 	finalHandler = middleware.ApplySecureHeaders(finalHandler)
 
 	srv := &http.Server{
@@ -647,12 +830,13 @@ func main() {
 		ReadTimeout:  appConfig.ProxyTimeout,
 		WriteTimeout: appConfig.ProxyTimeout,
 		IdleTimeout:  appConfig.ProxyTimeout * 2,
+		TLSConfig:    secureTransport.ServerTLSConfig(),
 	}
 
 	// Initializing the server in a goroutine so that it won't block the shutdown handling below
 	go func() {
-		log.Printf("Neutrophil Proxy Membrane starting on :%d", appConfig.ProxyPort)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("Neutrophil Proxy Membrane starting with mTLS on :%d", appConfig.ProxyPort)
+		if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
@@ -680,6 +864,9 @@ func buildProxyHandler(next http.Handler, secret string) http.Handler {
 
 	// Top layer: Panic recovery (Defense in Depth)
 	handler = recoveryMiddleware(handler)
+
+	// Layer 4: Input Validation
+	handler = middleware.InputValidationMiddleware(handler)
 
 	// Layer 3: Identity & Purpose (Least Privilege + JIT + Recertification)
 	handler = rbacManager.RBACMiddleware(handler)

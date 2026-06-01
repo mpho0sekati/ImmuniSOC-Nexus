@@ -1,9 +1,12 @@
 package middleware
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -80,6 +83,16 @@ func (st *SecureTransport) MTLSHandler(next http.Handler) http.Handler {
 	})
 }
 
+// ServerTLSConfig returns a TLS configuration that requires verified client certificates.
+func (st *SecureTransport) ServerTLSConfig() *tls.Config {
+	return &tls.Config{
+		Certificates: []tls.Certificate{st.serverCert},
+		ClientCAs:    st.clientCertPool,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		MinVersion:   tls.VersionTLS12,
+	}
+}
+
 // RequestSigningMiddleware validates signed requests
 func (st *SecureTransport) RequestSigningMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +115,11 @@ func (st *SecureTransport) RequestSigningMiddleware(next http.Handler) http.Hand
 }
 
 // computeRequestSignature creates a signature for the request
-func computeRequestSignature(r *http.Request, _ []byte) string {
+func computeRequestSignature(r *http.Request, key []byte) string {
+	return computeRequestSignatureWithKey(r, key)
+}
+
+func computeRequestSignatureWithKey(r *http.Request, key []byte) string {
 	// Create a canonical representation of the request
 	canonical := fmt.Sprintf("%s|%s|%s|%s",
 		r.Method,
@@ -110,15 +127,17 @@ func computeRequestSignature(r *http.Request, _ []byte) string {
 		r.Header.Get("Content-Type"),
 		r.Header.Get("X-Timestamp"))
 
-	// In a real implementation, you'd use a proper HMAC-SHA256
-	// This is simplified for demonstration
-	signature := base64.StdEncoding.EncodeToString([]byte(canonical))
-	return signature
+	h := hmac.New(sha256.New, key)
+	h.Write([]byte(canonical))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // SecureCompare performs a constant-time comparison to prevent timing attacks
 func SecureCompare(a, b string) bool {
-	return strings.Compare(a, b) == 0
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 // InputValidationMiddleware validates and sanitizes input
