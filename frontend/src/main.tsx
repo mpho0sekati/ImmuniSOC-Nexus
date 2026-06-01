@@ -1,9 +1,10 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import ImmuniiSOCDashboard from './ImmuniiSOCDashboard';
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import ImmuniSOCDashboard from './ImmuniiSOCDashboard'
+import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ImmuniiSOCDashboard />
-  </React.StrictMode>
-);
+    <ImmuniSOCDashboard />
+  </React.StrictMode>,
+)
