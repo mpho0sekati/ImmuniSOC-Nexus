@@ -81,7 +81,22 @@ func isAllowedOrigin(origin string) bool {
 		return dashboard.IsAllowedOrigin(origin)
 	}
 	// Fallback during initialization or if dashboard fails to start
-	return strings.HasPrefix(origin, "http://localhost")
+	if strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") {
+		return true
+	}
+
+	// Check environment variable for custom allowed origins
+	allowedOrigins := os.Getenv("DASHBOARD_ALLOWED_ORIGINS")
+	if allowedOrigins != "" {
+		origins := strings.Split(allowedOrigins, ",")
+		for _, o := range origins {
+			if strings.TrimSpace(o) == origin {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // validateTokenComplexity ensures tokens meet security requirements
@@ -356,9 +371,53 @@ func rbacProtectedEndpoint(requiredToken string, requiredRole rbac.UserRole, han
 func popiaCompliance(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Log the request for compliance purposes using the correct API
-		logEntry := fmt.Sprintf("ACCESS:%s:%s:%s", getClientIP(r), r.Method, r.URL.Path)
-		if err := immutableLogger.Append(logEntry); err != nil {
-			log.Printf("Error appending to log: %v", err)
+		if immutableLogger != nil {
+			logEntry := fmt.Sprintf("ACCESS:%s:%s:%s", getClientIP(r), r.Method, r.URL.Path)
+			if err := immutableLogger.Append(logEntry); err != nil {
+				log.Printf("Error appending to log: %v", err)
+			}
+		} else {
+			log.Printf("Warning: immutableLogger is not initialized")
+		}
+
+		// Check for POPIA compliance headers
+		purpose := r.Header.Get("X-PopIA-Purpose")
+		consent := r.Header.Get("X-PopIA-Consent")
+
+		// In a real system, we would call OPA to verify compliance.
+		// For this implementation, we'll perform a basic check.
+		if purpose == "" || (purpose != "CUSTOMER_SERVICE" && purpose != "MARKETING" && purpose != "ADMIN") {
+			http.Error(w, "Forbidden: Invalid or missing POPIA purpose", http.StatusForbidden)
+			return
+		}
+
+		if consent != "true" {
+			http.Error(w, "Forbidden: POPIA consent not provided", http.StatusForbidden)
+			return
+		}
+
+		// Call OPA for a more robust check if the client is available
+		client := opaClient
+		if client == nil {
+			client = opa.NewOpaClient()
+		}
+
+		allowed, err := client.CheckPopiaPolicy(map[string]interface{}{
+			"purpose":       purpose,
+			"consent_given": consent == "true",
+		})
+
+		// If OPA is reachable and denies the request, or if there's an error and we fail-closed
+		if err != nil {
+			// Fail-closed on OPA errors
+			log.Printf("OPA compliance check failed: %v", err)
+			http.Error(w, "Security Check Failure", http.StatusInternalServerError)
+			return
+		}
+
+		if !allowed {
+			http.Error(w, "Forbidden: POPIA compliance check failed", http.StatusForbidden)
+			return
 		}
 		
 		next.ServeHTTP(w, r)
@@ -373,8 +432,12 @@ func logSecurityEvent(eventType string, details map[string]interface{}) {
 		return
 	}
 	logEntry := fmt.Sprintf("SECURITY_EVENT:%s:%s", eventType, string(eventJSON))
-	if err := immutableLogger.Append(logEntry); err != nil {
-		log.Printf("Error appending security event to log: %v", err)
+	if immutableLogger != nil {
+		if err := immutableLogger.Append(logEntry); err != nil {
+			log.Printf("Error appending security event to log: %v", err)
+		}
+	} else {
+		log.Printf("Warning: immutableLogger is not initialized for security event: %s", eventType)
 	}
 }
 
@@ -397,6 +460,7 @@ var (
 	hardeningMgr         *hardening.HardeningManager        // System hardening manager
 	secureDashboard      *dashboard.Dashboard               // Secure dashboard (renamed to avoid conflict)
 	appConfig            *config.Config                     // Application configuration
+	opaClient            *opa.OpaClient                     // OPA client
 )
 
 // AdaptiveRateLimiter tracks rate limits with activity timestamps for cleanup
@@ -556,7 +620,7 @@ func main() {
 	classificationEngine = &classification.Classifier{}
 
 	// Initialize OPA client
-	opaClient := opa.NewOpaClient()
+	opaClient = opa.NewOpaClient()
 
 	// Initialize recertification manager
 	recertManager = rbac.NewRecertificationManager()

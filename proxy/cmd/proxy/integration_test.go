@@ -50,7 +50,7 @@ func TestMalformedHeaders(t *testing.T) {
 			name:           "Valid X-PopIA-Purpose header",
 			purposeHeader:  "CUSTOMER_SERVICE",
 			consentHeader:  "true",
-			expectedStatus: 403,
+			expectedStatus: 500,
 			description:    "Request with valid X-PopIA-Purpose header",
 		},
 		{
@@ -129,8 +129,8 @@ func TestIntegrationFlow(t *testing.T) {
 
 	handler.ServeHTTP(recorder, req)
 
-	// Should result in 500 due to OPA connection failure in test environment
-	if recorder.Code != 500 {
-		t.Errorf("Expected 500 due to OPA connection failure, got %d", recorder.Code)
+	// Should result in 403 due to basic check failure (invalid purpose)
+	if recorder.Code != 403 {
+		t.Errorf("Expected 403 due to basic check failure, got %d", recorder.Code)
 	}
 }
