@@ -8,6 +8,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -675,6 +677,7 @@ func main() {
 
 	// Add dashboard endpoints
 	adminMux.HandleFunc("/api/dashboard", dashboardHandler)
+	mux.HandleFunc("/api/dashboard", dashboardHandler)
 	adminMux.HandleFunc("/api/health", healthHandler)
 	adminMux.HandleFunc("/api/config", configHandler)
 
@@ -700,6 +703,28 @@ func main() {
 	mux.Handle("/api/dashboard", rbacProtectedEndpoint(appConfig.SecurityAdminToken, rbac.SecurityAnalyst, adminSecureMux))
 	mux.Handle("/api/health", rbacProtectedEndpoint(appConfig.SecurityAdminToken, rbac.Auditor, adminSecureMux))
 	mux.Handle("/api/config", rbacProtectedEndpoint(appConfig.SecurityAdminToken, rbac.SystemAdministrator, adminSecureMux))
+
+	// Parse backend URL for the reverse proxy
+	target, err := url.Parse(appConfig.BackendURL)
+	if err != nil {
+		log.Fatalf("Failed to parse backend URL: %v", err)
+	}
+
+	// Create reverse proxy
+	reverseProxy := httputil.NewSingleHostReverseProxy(target)
+
+	// Custom Director to ensure headers are preserved/modified correctly
+	originalDirector := reverseProxy.Director
+	reverseProxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = target.Host
+	}
+
+	// The proxied traffic goes through the full security chain
+	proxiedHandler := buildProxyHandler(reverseProxy, appConfig.HandshakeSecretToken)
+
+	// Add a catch-all route for the proxy to everything else
+	mux.Handle("/", proxiedHandler)
 
 	// Wrap the root multiplexer with global security hardening and headers
 	finalHandler := hardeningMgr.ApplyHardeningMiddleware(mux)

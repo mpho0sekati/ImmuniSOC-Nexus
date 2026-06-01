@@ -24,6 +24,8 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
+import ThreatMap from './ThreatMap';
+import BloodhoundHunt from './BloodhoundHunt';
 
 // Types to match our Go backend
 interface SecurityMetrics {
@@ -67,9 +69,13 @@ const ImmuniSOCDashboard = () => {
 
   const fetchDashboardData = async () => {
     try {
+      // In a real environment, we'd use environment variables or secure session management.
+      // This placeholder token matches the default in our .env.example for easy previewing.
+      const token = 'AdminNexus#2026#SecureAccess';
+
       const response = await fetch('http://localhost:8080/api/dashboard', {
         headers: {
-          'X-Admin-Token': 'ADMIN_SECRET_TOKEN_PLACEHOLDER' // In a real app, this would be from a secure session
+          'X-Admin-Token': token
         }
       });
       if (!response.ok) throw new Error('Failed to fetch security data');
@@ -83,7 +89,7 @@ const ImmuniSOCDashboard = () => {
       // Fallback data for demo if backend is not reachable
       if (!metrics) {
         setMetrics({
-          active_threats: 2,
+          active_threats: 4,
           blocked_requests: 1240,
           honeytoken_hits: 5,
           active_sessions: 12,
@@ -96,6 +102,17 @@ const ImmuniSOCDashboard = () => {
           compliance_status: "COMPLIANT",
           encryption_status: "AES-256-GCM"
         });
+        setThreats([
+          { id: '1', type: 'SQL_INJECTION_ATTEMPT', severity: 'CRITICAL', source_ip: '192.168.1.45', timestamp: new Date().toISOString(), description: 'Volumetric spike on /api/v1/auth', confidence: 0.98 },
+          { id: '2', type: 'HONEYTOKEN_HIT', severity: 'HIGH', source_ip: '10.0.0.12', timestamp: new Date().toISOString(), description: 'Access to /admin/config.php detected', confidence: 1.0 },
+          { id: '3', type: 'LATERAL_MOVEMENT', severity: 'HIGH', source_ip: '172.16.5.2', timestamp: new Date().toISOString(), description: 'Pivot attempt detected by Bloodhound', confidence: 0.92 },
+          { id: '4', type: 'BRUTE_FORCE', severity: 'MEDIUM', source_ip: '45.33.1.9', timestamp: new Date().toISOString(), description: 'Multiple failed logins on service-billing', confidence: 0.85 },
+        ]);
+        setTimeline([
+          { action_type: 'IP_BLOCK', target: '192.168.1.45', severity: 4, timestamp: new Date().toISOString(), description: 'Critical neutralization of ingress vector.' },
+          { action_type: 'SESSION_KILL', target: 'sess_99a8', severity: 3, timestamp: new Date().toISOString(), description: 'Bloodhound pivot detection triggered.' },
+          { action_type: 'ENHANCED_LOGGING', target: '172.16.5.2', severity: 2, timestamp: new Date().toISOString(), description: 'Deep packet inspection activated.' },
+        ]);
       }
     }
   };
@@ -201,8 +218,22 @@ const ImmuniSOCDashboard = () => {
             />
           </div>
 
+          {/* Threat World Map */}
+          <div className="glass-panel p-6 glow-blue relative overflow-hidden">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-semibold flex items-center gap-2">
+                <GlobeIcon className="w-4 h-4 text-primary" />
+                Global Threat Nexus
+              </h3>
+              <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">
+                Real-Time Ingress Mapping
+              </div>
+            </div>
+            <ThreatMap threats={threats} />
+          </div>
+
           {/* Activity Chart */}
-          <div className="glass-panel p-6 glow-blue">
+          <div className="glass-panel p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-white font-semibold flex items-center gap-2">
@@ -269,6 +300,26 @@ const ImmuniSOCDashboard = () => {
             </div>
           </div>
 
+          {/* Operative Narrative Log */}
+          <div className="glass-panel p-6 relative overflow-hidden group">
+            <div className="scanline"></div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-semibold flex items-center gap-2">
+                <Terminal className="w-4 h-4 text-primary" />
+                Operative 04 Narrative Log
+              </h3>
+              <div className="text-[9px] font-hand text-yellow-500/60 uppercase">Manual Entry Mode</div>
+            </div>
+            <div className="space-y-4">
+              <div className="operative-note">
+                "Detected a volumetric spike originating from known malicious subnets. Automated T-Cell response engaged. I'm seeing patterns of a coordinated credential stuffing attack on the billing endpoint. I've increased the honeypot sensitivity in that segment."
+              </div>
+              <div className="operative-note">
+                "Bloodhound is tracking a persistent actor trying to pivot from the public frontend to the database vault. All attempts have been successfully diverted to the deception mesh. Intelligence suggests this is a known state-sponsored group."
+              </div>
+            </div>
+          </div>
+
           {/* Threat List */}
           <div className="glass-panel p-6">
             <h3 className="text-white font-semibold flex items-center gap-2 mb-6">
@@ -320,6 +371,9 @@ const ImmuniSOCDashboard = () => {
 
         {/* Sidebar - Right Column */}
         <div className="lg:col-span-4 space-y-6">
+
+          {/* Bloodhound Hunt Visualization */}
+          <BloodhoundHunt />
 
           {/* T-Cell Actions Timeline */}
           <div className="glass-panel p-6">
@@ -431,5 +485,11 @@ const StatusRow = ({ label, status }: { label: string, status: 'active' | 'warni
     </div>
   );
 };
+
+const GlobeIcon = ({ className }: any) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+  </svg>
+);
 
 export default ImmuniSOCDashboard;

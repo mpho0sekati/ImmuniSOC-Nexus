@@ -23,7 +23,7 @@ services:
 
   backend:
     # Minimal Go backend for demonstration
-    image: golang:1.25-alpine
+    image: golang:1.24-alpine
     command: >
       sh -c "echo 'package main; import \"net/http\"; func main() { http.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(\"Backend Operational\")) }); http.ListenAndServe(\":8081\", nil) }' > main.go && go run main.go"
     networks:
