@@ -73,7 +73,8 @@ const ImmuniSOCDashboard = () => {
       // This placeholder token matches the default in our .env.example for easy previewing.
       const token = 'AdminNexus#2026#SecureAccess';
 
-      const response = await fetch('http://localhost:8080/api/dashboard', {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+      const response = await fetch(`${apiUrl}/api/dashboard`, {
         headers: {
           'X-Admin-Token': token
         }

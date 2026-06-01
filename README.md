@@ -54,5 +54,17 @@ npm install
 npm run dev
 ```
 
+## Cloud Deployment (Render.com)
+
+To host this for judges to see a live version, we recommend using **Render.com** (Free Tier):
+
+1. **Push to GitHub**: Push your local changes to a new GitHub repository.
+2. **Connect to Render**: Log in to Render.com and click **New > Blueprint**.
+3. **Select Repository**: Select your GitHub repository.
+4. **Deploy**: Render will automatically detect the `render.yaml` file and set up both the Go Backend and the React Frontend.
+   - The Go backend will be assigned a URL like `https://immunisoc-proxy.onrender.com`.
+   - The React frontend will be assigned a URL like `https://immunisoc-dashboard.onrender.com`.
+   - The `render.yaml` automatically wires the `VITE_API_URL` environment variable so the dashboard knows how to talk to the backend.
+
 ---
 *ImmuniSOC-Nexus: Bio-Inspired Network Security*

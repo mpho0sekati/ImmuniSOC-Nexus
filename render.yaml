@@ -1,0 +1,37 @@
+services:
+  # Go Proxy Backend
+  - type: web
+    name: immunisoc-proxy
+    env: go
+    repo: ${RENDER_GIT_REPO} # Uses the current repo
+    buildCommand: cd proxy && go build -o main ./cmd/proxy
+    startCommand: cd proxy && ./main
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: HANDSHAKE_SECRET_TOKEN
+        generateValue: true
+      - key: SECURITY_ADMIN_TOKEN
+        generateValue: true
+      - key: LOG_SECRET
+        generateValue: true
+      - key: DECEPTION_SECRET
+        generateValue: true
+      - key: BACKEND_URL
+        value: http://localhost:8081 # Placeholder or internal service
+      - key: DASHBOARD_ALLOWED_ORIGINS
+        fromContext: frontend_url
+
+  # React Frontend
+  - type: static
+    name: immunisoc-dashboard
+    env: static
+    repo: ${RENDER_GIT_REPO}
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        fromContext: backend_url
+    routingRules:
+      - route: /*
+        rewritePath: /index.html
