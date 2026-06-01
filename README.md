@@ -66,5 +66,17 @@ To host this for judges to see a live version, we recommend using **Render.com**
    - The React frontend will be assigned a URL like `https://immunisoc-dashboard.onrender.com`.
    - The `render.yaml` automatically wires the `VITE_API_URL` environment variable so the dashboard knows how to talk to the backend.
 
+## Hosting on Hugging Face Spaces
+
+This project is optimized for Hugging Face Spaces using Docker:
+
+1. **Create a New Space**: Go to [Hugging Face Spaces](https://huggingface.co/new-space) and create a new Space.
+2. **Select SDK**: Select **Docker** as the SDK.
+3. **Upload Files**: Upload all files from this repository.
+4. **Rename Dockerfile**: Hugging Face expects the Dockerfile to be named `Dockerfile` in the root.
+   - Rename `Dockerfile.hf` to `Dockerfile`.
+   - Ensure `hf-nginx.conf` and `entrypoint.sh` are also in the root.
+5. **Configuration**: Hugging Face will automatically build and serve the application on port 7860. The `entrypoint.sh` handles starting both the Go security gateway and the React dashboard.
+
 ---
 *ImmuniSOC-Nexus: Bio-Inspired Network Security*
