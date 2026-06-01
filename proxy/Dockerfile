@@ -1,15 +1,33 @@
-# Build a static Go binary
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
+
 WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache gcc musl-dev
+
+# Copy go mod and sum
 COPY go.mod go.sum ./
 RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/proxy
 
-FROM alpine:3.18
-RUN apk --no-cache add ca-certificates
+# Copy source code
+COPY . .
+
+# Build the proxy
+RUN CGO_ENABLED=0 GOOS=linux go build -o proxy ./cmd/proxy
+
+# Final stage
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates
+
 WORKDIR /root/
-COPY --from=builder /app/main .
-COPY --from=builder /app/go.mod .
+
+# Copy the binary
+COPY --from=builder /app/proxy .
+
+# Create logs directory
+RUN mkdir logs
+
 EXPOSE 8080
-CMD ["./main"]
+
+CMD ["./proxy"]

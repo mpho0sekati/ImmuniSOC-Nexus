@@ -1,32 +1,56 @@
 version: '3.8'
-services:
-  backend:
-    build:
-      context: ./proxy/backend-spring
-      dockerfile: Dockerfile
-    ports:
-      - "8081:8081"
-    restart: unless-stopped
 
+services:
   proxy:
     build:
       context: ./proxy
       dockerfile: Dockerfile
-    depends_on:
-      - backend
-    environment:
-      - BACKEND_HOST=backend:8081
     ports:
       - "8080:8080"
-      - "8090:8090"
-    restart: unless-stopped
+    environment:
+      - HANDSHAKE_SECRET_TOKEN=${HANDSHAKE_SECRET_TOKEN}
+      - SECURITY_ADMIN_TOKEN=${SECURITY_ADMIN_TOKEN}
+      - JWT_SECRET=${JWT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - LOG_SECRET=${LOG_SECRET}
+      - BACKEND_URL=http://backend:8081
+      - OPA_URL=http://opa:8181
+    depends_on:
+      - backend
+      - opa
+    networks:
+      - nexus-network
+
+  backend:
+    # Minimal Go backend for demonstration
+    image: golang:1.24-alpine
+    command: >
+      sh -c "echo 'package main; import \"net/http\"; func main() { http.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(\"Backend Operational\")) }); http.ListenAndServe(\":8081\", nil) }' > main.go && go run main.go"
+    networks:
+      - nexus-network
+
+  opa:
+    image: openpolicyagent/opa:latest
+    ports:
+      - "8181:8181"
+    command:
+      - "run"
+      - "--server"
+      - "--addr=:8181"
+    networks:
+      - nexus-network
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    ports:
+      - "80:80"
     depends_on:
       - proxy
-    ports:
-      - "5173:80"
-    restart: unless-stopped
+    networks:
+      - nexus-network
+
+networks:
+  nexus-network:
+    driver: bridge

@@ -3,6 +3,7 @@ package middleware
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -46,7 +47,7 @@ func ApplyAuthentication(sharedSecret string) func(http.Handler) http.Handler {
 			expectedSignature := computeExpectedSignature(r, sharedSecret, timestamp)
 
 			// Compare signatures securely
-			if !SecureCompare(signature, expectedSignature) {
+			if subtle.ConstantTimeCompare([]byte(signature), []byte(expectedSignature)) != 1 {
 				http.Error(w, "Invalid request signature", http.StatusUnauthorized)
 				return
 			}
