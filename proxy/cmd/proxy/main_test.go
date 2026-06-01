@@ -6,6 +6,14 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"immunisoc-nexus/proxy/internal/bloodhound"
+	"immunisoc-nexus/proxy/internal/config"
+	"immunisoc-nexus/proxy/internal/deception"
+	"immunisoc-nexus/proxy/internal/hardening"
+	"immunisoc-nexus/proxy/internal/rbac"
+	"immunisoc-nexus/proxy/internal/tcell"
 )
 
 func TestVerbWhitelist(t *testing.T) {
@@ -207,6 +215,17 @@ func TestBuildProxyHandler(t *testing.T) {
 	os.Setenv("HANDSHAKE_TOKEN", "test-token")
 	defer os.Setenv("HANDSHAKE_TOKEN", originalToken)
 
+	// Initialize required components to avoid nil pointer dereferences
+	appConfig = &config.Config{
+		RateLimitRequests: 100,
+		RateLimitWindow:   time.Minute,
+	}
+	tcellEngine = tcell.NewEngine()
+	deceptionGen = deception.NewGenerator("test")
+	bloodTracker = bloodhound.NewTracker()
+	rbacManager = rbac.NewRBACManager(nil, nil)
+	hardeningMgr = hardening.NewHardeningManager(nil, nil)
+
 	// Since buildProxyHandler includes authentication, we need to provide a signature
 	handler := buildProxyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -217,6 +236,7 @@ func TestBuildProxyHandler(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"test":"data"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-Signature", "test-signature") // This will fail signature verification
+	req.Header.Set("X-Request-Timestamp", time.Now().Format(time.RFC3339))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 

@@ -745,6 +745,11 @@ func buildProxyHandler(next http.Handler, secret string) http.Handler {
 	// Top layer: Panic recovery (Defense in Depth)
 	handler = recoveryMiddleware(handler)
 
+	// Security Hardening & Enforcement
+	handler = middleware.RateLimitMiddleware(appConfig.RateLimitRequests, appConfig.RateLimitWindow)(handler)
+	handler = middleware.TCellMiddleware(tcellEngine)(handler)
+	handler = middleware.DeceptionMiddleware(deceptionGen, bloodTracker)(handler)
+
 	// Layer 3: Identity & Purpose (Least Privilege + JIT + Recertification)
 	handler = rbacManager.RBACMiddleware(handler)
 	// Layer 2: System Hardening (Service Lifecycle Enforcement)
