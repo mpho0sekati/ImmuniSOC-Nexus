@@ -6,23 +6,30 @@ This repository contains the ImmuniSOC-Nexus cybersecurity platform. Follow thes
 - [Docker](https://www.docker.com/products/docker-desktop)
 - [Docker Compose](https://docs.docker.com/compose/install/)
 
-## Quick Setup
+## 🚀 Easy Start (One-Click)
 
-1. **Configure Environment Variables**
-   Copy the example environment file to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-   *Note: For a quick preview, the default values in `.env.example` will work.*
+The fastest way to get the entire platform running is using the provided setup scripts:
 
-2. **Start the Platform**
-   Run the following command in the root directory:
-   ```bash
-   docker compose up --build
-   ```
-   Alternatively, use the helper scripts:
-   - Windows (PowerShell): `./start-all.ps1`
-   - Windows (CMD): `start-all.cmd`
+- **Linux / macOS**:
+  ```bash
+  ./setup.sh
+  ```
+  *Alternatively, if you have `make` installed, just run `make setup`.*
+
+- **Windows**:
+  Double-click `start-all.cmd` or run `./start-all.ps1` in PowerShell.
+
+Once started, access the system at:
+- **Frontend Dashboard**: [http://localhost:80](http://localhost:80)
+- **Proxy API**: [http://localhost:8080](http://localhost:8080)
+
+### Using Docker Compose Manually
+
+If you prefer to run the commands yourself:
+```bash
+docker compose up --build -d
+```
+The platform will use secure defaults even if you haven't created a `.env` file yet.
 
 3. **Access the Dashboard**
    Once all containers are running:

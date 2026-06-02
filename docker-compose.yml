@@ -8,11 +8,10 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - HANDSHAKE_SECRET_TOKEN=${HANDSHAKE_SECRET_TOKEN}
-      - SECURITY_ADMIN_TOKEN=${SECURITY_ADMIN_TOKEN}
-      - JWT_SECRET=${JWT_SECRET}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-      - LOG_SECRET=${LOG_SECRET}
+      - HANDSHAKE_SECRET_TOKEN=${HANDSHAKE_SECRET_TOKEN:-NexusSecret2026}
+      - SECURITY_ADMIN_TOKEN=${SECURITY_ADMIN_TOKEN:-AdminNexus#2026#SecureAccess}
+      - LOG_SECRET=${LOG_SECRET:-MonocyteLogSecret}
+      - DECEPTION_SECRET=${DECEPTION_SECRET:-HoneyTokenSecret}
       - BACKEND_URL=http://backend:8081
       - OPA_URL=http://opa:8181
     depends_on:

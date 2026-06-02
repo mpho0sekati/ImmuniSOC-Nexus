@@ -677,7 +677,6 @@ func main() {
 
 	// Add dashboard endpoints
 	adminMux.HandleFunc("/api/dashboard", dashboardHandler)
-	mux.HandleFunc("/api/dashboard", dashboardHandler)
 	adminMux.HandleFunc("/api/health", healthHandler)
 	adminMux.HandleFunc("/api/config", configHandler)
 

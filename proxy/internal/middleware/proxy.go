@@ -121,6 +121,14 @@ func init() {
 
 // RateLimitMiddleware limits requests per IP address
 func RateLimitMiddleware(requestsPerWindow int, window time.Duration) func(http.Handler) http.Handler {
+	if requestsPerWindow <= 0 {
+		// Default to a reasonable limit if misconfigured
+		requestsPerWindow = 100
+	}
+	if window <= 0 {
+		window = time.Minute
+	}
+
 	// Convert requests per window to rate per second
 	limit := rate.Every(window / time.Duration(requestsPerWindow))
 
