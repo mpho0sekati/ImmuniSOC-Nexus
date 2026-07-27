@@ -63,7 +63,13 @@ npm run dev
 
 ## Cloud Deployment (Render.com)
 
-To host this for judges to see a live version, we recommend using **Render.com** (Free Tier):
+To host this for judges to see a live version, we recommend using **Render.com** (Free Tier). You can deploy the entire stack instantly using this button:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/your-username/your-repo-name)
+
+*(Note: Replace the `your-username/your-repo-name` with your actual repository URL after pushing your code.)*
+
+### Manual Render Blueprint Setup:
 
 1. **Push to GitHub**: Push your local changes to a new GitHub repository.
 2. **Connect to Render**: Log in to Render.com and click **New > Blueprint**.
